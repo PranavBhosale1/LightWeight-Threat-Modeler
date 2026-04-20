@@ -1,8 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import strideQuestionnaire from "./strideQuestionnaire.json";
 import ThreatModelerCanvas from "./ThreatModelerCanvas.jsx";
 import { extractProjectZipContext } from "./projectZipContext.js";
+import { extractStructuralModulesFromZip } from "./projectStructureModules.js";
+import { extractModulesFromCodeImports } from "./codeImportModules.js";
 import { DEFAULT_GEMINI_API_KEY } from "./geminiEnv.js";
+import { COMPONENT_LIBRARY, getComponent, listComponentOptions, injectFromLibrary, reseedLibraryThreats } from "./componentEngine.js";
+import { classifyModulesByRules, classifyModulesWithAi, unresolvedModules } from "./componentClassifier.js";
+import StencilDesigner from "./stencilDesigner.jsx";
 
 const STRIDE = [
   { id: "S", name: "Spoofing", color: "#f59e0b", desc: "Impersonating an entity" },
@@ -180,7 +185,18 @@ function slugify(value = "threat-modeler") {
 }
 
 function createModule(id) {
-  return { id, parentId: "", name: "", inputs: "", outputs: "", dataStores: "", externalEntities: "" };
+  return {
+    id,
+    parentId: "",
+    name: "",
+    inputs: "",
+    outputs: "",
+    dataStores: "",
+    externalEntities: "",
+    componentType: "",
+    componentTypeSource: "",
+    securityRequirements: []
+  };
 }
 
 /** Map Gemini JSON rows to module objects (parentName resolved to parentId when possible). */
@@ -206,7 +222,7 @@ function modulesFromAiJson(raw) {
     nameToId[row.name] = ids[i];
   });
 
-  return cleaned.map((row, i) => ({
+  return cleaned.map((row, i) => normalizeModule({
     id: ids[i],
     parentId: row.parentName && nameToId[row.parentName] ? nameToId[row.parentName] : "",
     name: row.name,
@@ -215,6 +231,26 @@ function modulesFromAiJson(raw) {
     dataStores: row.dataStores,
     externalEntities: row.externalEntities
   }));
+}
+
+/** Make sure modules from any source carry the new typed-component fields. */
+function normalizeModule(module) {
+  return {
+    id: module.id,
+    parentId: module.parentId || "",
+    name: module.name || "",
+    inputs: module.inputs || "",
+    outputs: module.outputs || "",
+    dataStores: module.dataStores || "",
+    externalEntities: module.externalEntities || "",
+    componentType: module.componentType || "",
+    componentTypeSource: module.componentTypeSource || "",
+    securityRequirements: Array.isArray(module.securityRequirements) ? module.securityRequirements : []
+  };
+}
+
+function normalizeModules(list) {
+  return (Array.isArray(list) ? list : []).map(normalizeModule);
 }
 
 function createTrustBoundary(id) {
@@ -429,6 +465,31 @@ function buildReportPayload({ profile, modules, trustBoundaries, threats, mitiga
   const applicableThreats = threats.filter((threat) => threat.status === "applicable");
   const proneness = threatProneness(applicableThreats);
 
+  const bySource = modules
+    .filter((module) => module.name.trim())
+    .map((module) => {
+      const moduleThreats = threats.filter((t) => t.moduleId === module.id);
+      const requirements = (module.securityRequirements || []).map((r) => ({
+        title: r.title,
+        controlFamily: r.controlFamily || "",
+        status: r.status,
+        jiraKey: r.jiraKey || ""
+      }));
+      const counts = requirements.reduce((acc, r) => {
+        acc[r.status] = (acc[r.status] || 0) + 1;
+        return acc;
+      }, {});
+      return {
+        moduleId: module.id,
+        moduleName: module.name,
+        componentType: module.componentType || "",
+        threatCount: moduleThreats.length,
+        applicableThreats: moduleThreats.filter((t) => t.status === "applicable").length,
+        requirements,
+        requirementStatusCounts: counts
+      };
+    });
+
   return {
     generatedAt: new Date().toISOString(),
     profile,
@@ -437,6 +498,7 @@ function buildReportPayload({ profile, modules, trustBoundaries, threats, mitiga
     dfd,
     threats,
     mitigations,
+    bySource,
     prioritization: {
       businessCriticality: profile.criticality,
       threatProneness: proneness.label,
@@ -668,16 +730,19 @@ function Level1DFDCanvas({ modules, trustBoundaries, svgId }) {
   );
 }
 
-function Step1({ profile, setProfile }) {
+function Step1({ profile, setProfile, zipBufferRef, onOpenDesigner }) {
   const [zipLoading, setZipLoading] = useState(false);
   const [zipErr, setZipErr] = useState(null);
   const [zipMeta, setZipMeta] = useState(null);
   const zipInputRef = useRef(null);
   const update = (key, value) => setProfile((current) => ({ ...current, [key]: value }));
+  const isLegacy = profile.appStatus === "legacy" || profile.appStatus === "redesign";
+  const isNew = profile.appStatus === "new";
 
   const clearZip = () => {
     setZipErr(null);
     setZipMeta(null);
+    if (zipBufferRef) zipBufferRef.current = null;
     setProfile((current) => ({ ...current, zipDerivedContext: "", zipFileName: "" }));
     if (zipInputRef.current) zipInputRef.current.value = "";
   };
@@ -689,6 +754,7 @@ function Step1({ profile, setProfile }) {
     setZipLoading(true);
     try {
       const buf = await file.arrayBuffer();
+      if (zipBufferRef) zipBufferRef.current = buf;
       const { text, meta } = await extractProjectZipContext(buf);
       setProfile((current) => ({
         ...current,
@@ -705,22 +771,74 @@ function Step1({ profile, setProfile }) {
     }
   };
 
+  const flowTile = (id, label, sub, accent) => {
+    const active = profile.appStatus === id;
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={() => update("appStatus", id)}
+        style={{
+          flex: 1,
+          minWidth: 200,
+          textAlign: "left",
+          background: active ? `${accent}10` : "#080e1a",
+          border: `1px solid ${active ? accent : "#1a2540"}`,
+          borderRadius: 8,
+          padding: "12px 14px",
+          cursor: "pointer",
+          color: "#e2e8f0",
+          fontFamily: "'DM Sans',sans-serif"
+        }}
+      >
+        <div style={{ color: accent, fontFamily: "monospace", fontSize: 11, letterSpacing: 1 }}>{active ? "ACTIVE" : "OPTION"}</div>
+        <div style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 700, marginTop: 4 }}>{label}</div>
+        <div style={{ color: "#64748b", fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{sub}</div>
+      </button>
+    );
+  };
+
   return (
     <>
-      <SHdr n={1} title="Application Profile" sub="Add your repository link and context, then describe the system. Use Settings (top right) if you need a Gemini API key for AI-assisted steps." />
+      <SHdr n={1} title="Application Profile" sub="Pick a flow, fill in metadata, and (depending on the flow) point at a repo or open the stencil designer. Use Settings (top right) for the Gemini API key." />
 
       <div style={C.card}>
-        <div style={{ color: "#30d158", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>SOURCE REPOSITORY</div>
+        <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>FLOW</div>
         <p style={{ color: "#475569", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
-          Point at a Git repo and optionally paste a folder tree, README excerpt, or <code style={{ color: "#94a3b8" }}>package.json</code> / stack hints. The app cannot clone private repos in the browser — Gemini uses what you provide here to suggest modules and DFDs in the next steps.
+          Pick the flow that matches what you have. <strong style={{ color: "#cbd5e1" }}>Legacy</strong> reverse-engineers components from a repo / ZIP. <strong style={{ color: "#cbd5e1" }}>New</strong> opens a drag-and-drop stencil designer where you compose the architecture from typed components.
         </p>
-        <div style={C.g2}>
-          <Fld label="Repository URL"><Inp value={profile.repoUrl} onChange={(event) => update("repoUrl", event.target.value)} placeholder="https://github.com/org/service" /></Fld>
-          <Fld label="Default branch (optional)"><Inp value={profile.repoBranch} onChange={(event) => update("repoBranch", event.target.value)} placeholder="main" /></Fld>
-          <Fld label="Repository context (paste tree, README, dependencies…)" span><Txt value={profile.repoContext} onChange={(event) => update("repoContext", event.target.value)} placeholder={`e.g.\nsrc/\n  api/\n  auth/\n  workers/\n\nOr paste README "Architecture" section…`} style={{ height: 100 }} /></Fld>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {flowTile("legacy", "Legacy / Production", "Reverse-engineer modules and components from an uploaded ZIP or pasted repo context.", "#ff9f0a")}
+          {flowTile("new", "New / In Development", "Design the architecture from typed components in the stencil designer; threats and security requirements attach automatically.", "#00b4d8")}
+          {flowTile("redesign", "Redesign / Major Update", "Hybrid — start from existing repo context but free-edit modules and DFD as you redesign.", "#a78bfa")}
         </div>
       </div>
 
+      {isNew && (
+        <div style={{ ...C.card, borderColor: "#00b4d8" }}>
+          <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>STENCIL DESIGNER</div>
+          <p style={{ color: "#475569", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
+            Drag typed components onto the canvas (Login, Database, Payment Gateway, Queue …) and connect them. Each stencil instantly attaches its STRIDE threats and security requirements from the built-in library. Save returns to the wizard so you can continue with DFD, STRIDE, DREAD, and Report.
+          </p>
+          <button type="button" onClick={onOpenDesigner} style={{ ...C.btn, ...C.btnP }}>Open stencil designer</button>
+        </div>
+      )}
+
+      {isLegacy && (
+        <div style={C.card}>
+          <div style={{ color: "#30d158", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>SOURCE REPOSITORY</div>
+          <p style={{ color: "#475569", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
+            Point at a Git repo and optionally paste a folder tree, README excerpt, or <code style={{ color: "#94a3b8" }}>package.json</code> / stack hints. The app cannot clone private repos in the browser — Gemini uses what you provide here to suggest modules and DFDs in the next steps.
+          </p>
+          <div style={C.g2}>
+            <Fld label="Repository URL"><Inp value={profile.repoUrl} onChange={(event) => update("repoUrl", event.target.value)} placeholder="https://github.com/org/service" /></Fld>
+            <Fld label="Default branch (optional)"><Inp value={profile.repoBranch} onChange={(event) => update("repoBranch", event.target.value)} placeholder="main" /></Fld>
+            <Fld label="Repository context (paste tree, README, dependencies…)" span><Txt value={profile.repoContext} onChange={(event) => update("repoContext", event.target.value)} placeholder={`e.g.\nsrc/\n  api/\n  auth/\n  workers/\n\nOr paste README "Architecture" section…`} style={{ height: 100 }} /></Fld>
+          </div>
+        </div>
+      )}
+
+      {isLegacy && (
       <div style={C.card}>
         <div style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>PROJECT ZIP + NOTES FOR THE MODEL</div>
         <p style={{ color: "#475569", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
@@ -758,6 +876,7 @@ function Step1({ profile, setProfile }) {
           />
         </Fld>
       </div>
+      )}
 
       <div style={C.card}>
         <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 12, marginBottom: 14 }}>APPLICATION METADATA</div>
@@ -794,30 +913,182 @@ function Step1({ profile, setProfile }) {
   );
 }
 
-function Step2({ modules, setModules, apiKey, profile }) {
+function Step2({ modules, setModules, apiKey, profile, setProfile, zipBufferRef }) {
   const [genLoading, setGenLoading] = useState(false);
   const [genErr, setGenErr] = useState(null);
+  const [genMeta, setGenMeta] = useState(null);
+  const analyzeZipInputRef = useRef(null);
+  const [aiClassifyLoading, setAiClassifyLoading] = useState(false);
+  const [aiClassifyErr, setAiClassifyErr] = useState(null);
+  const [aiClassifyMeta, setAiClassifyMeta] = useState(null);
+
+  const componentOptions = listComponentOptions();
 
   const addModule = () => setModules((current) => [...current, createModule(`m-${Date.now()}`)]);
   const removeModule = (id) => setModules((current) => current.filter((module) => module.id !== id));
-  const updateModule = (id, key, value) => setModules((current) => current.map((module) => module.id === id ? { ...module, [key]: value } : module));
+  const updateModule = (id, key, value) => setModules((current) => current.map((module) => {
+    if (module.id !== id) return module;
+    if (key === "componentType") {
+      const next = injectFromLibrary({ ...module, componentType: value, componentTypeSource: "user" });
+      return next;
+    }
+    return { ...module, [key]: value };
+  }));
 
-  const generateFromRepo = async () => {
-    setGenErr(null);
+  const applyRulesClassifier = (incoming) => {
+    const classified = classifyModulesByRules(incoming, { text: profile.zipDerivedContext || "" });
+    return classified.map((m) => (m.componentType ? injectFromLibrary(m) : m));
+  };
+
+  const runAiClassifier = async () => {
+    setAiClassifyErr(null);
+    setAiClassifyMeta(null);
     if (!apiKey.trim()) {
-      setGenErr("Add a Gemini API key in step 1 to generate modules from the repository.");
+      setAiClassifyErr("Add a Gemini API key (Settings) to use AI classification.");
       return;
     }
-    const hint = [profile.repoUrl, profile.repoBranch && `branch: ${profile.repoBranch}`, profile.repoContext].filter(Boolean).join("\n");
-    const llmBundle = profileContextForLlm(profile).trim();
-    if (!hint.trim() && !profile.description?.trim() && !profile.techStack?.trim() && !llmBundle) {
-      setGenErr("Add a repository URL, paste context, upload a project ZIP, add notes for the AI, or fill description / stack so the model has something to infer.");
+    const targets = unresolvedModules(modules.filter((m) => m.name.trim()));
+    if (!targets.length) {
+      setAiClassifyMeta("All modules are already classified.");
       return;
+    }
+    setAiClassifyLoading(true);
+    try {
+      const map = await classifyModulesWithAi({ gemini, apiKey, modules: targets });
+      if (!map.size) {
+        setAiClassifyMeta("AI returned no confident matches — review manually.");
+        return;
+      }
+      setModules((current) => current.map((module) => {
+        if (!map.has(module.id)) return module;
+        return injectFromLibrary({ ...module, componentType: map.get(module.id), componentTypeSource: "classifier-ai" });
+      }));
+      setAiClassifyMeta(`AI classified ${map.size} of ${targets.length} unresolved modules.`);
+    } catch (err) {
+      setAiClassifyErr(err.message || String(err));
+    } finally {
+      setAiClassifyLoading(false);
+    }
+  };
+
+  const runDeterministicSignals = async (buf) => {
+    const [structRes, codeRes] = await Promise.allSettled([
+      extractStructuralModulesFromZip(buf),
+      extractModulesFromCodeImports(buf)
+    ]);
+    return {
+      structural: structRes.status === "fulfilled" ? structRes.value : { modules: [], meta: null, error: structRes.reason?.message },
+      imports: codeRes.status === "fulfilled" ? codeRes.value : { modules: [], meta: null, error: codeRes.reason?.message }
+    };
+  };
+
+  const buildSignalsBlock = (signals) => {
+    const lines = [];
+    const struct = signals.structural?.modules || [];
+    const imports = signals.imports?.modules || [];
+
+    if (struct.length) {
+      lines.push("Structural modules (from manifests / workspaces / folder layout — these names exist in the build system):");
+      struct.forEach((m, i) => lines.push(`  ${i + 1}. ${m.name}`));
+      if (signals.structural.meta?.detail) {
+        lines.push(`  source: ${signals.structural.meta.detail}`);
+      }
+    } else {
+      lines.push("Structural modules: (no workspace/manifest signals detected)");
     }
 
+    lines.push("");
+
+    if (imports.length) {
+      lines.push("Import-clustered modules (from JS/TS import graph — these are folders that actually exchange code):");
+      imports.forEach((m, i) => {
+        const ext = (m.externalEntities || "").trim();
+        const out = (m.outputs || "").trim();
+        const extPart = ext ? ` · external deps: ${ext.slice(0, 240)}${ext.length > 240 ? "…" : ""}` : "";
+        const outPart = out ? ` · ${out.slice(0, 200)}${out.length > 200 ? "…" : ""}` : "";
+        lines.push(`  ${i + 1}. ${m.name}${extPart}${outPart}`);
+      });
+      if (signals.imports.meta?.detail) {
+        lines.push(`  source: ${signals.imports.meta.detail}`);
+      }
+    } else {
+      lines.push("Import-clustered modules: (no JS/TS source clusters detected)");
+    }
+
+    return lines.join("\n");
+  };
+
+  const fallbackModulesFromSignals = (signals) => {
+    const struct = signals.structural?.modules || [];
+    const imports = signals.imports?.modules || [];
+    const byName = new Map();
+    const push = (m) => {
+      const key = (m.name || "").trim().toLowerCase();
+      if (!key) return;
+      if (!byName.has(key)) {
+        byName.set(key, { ...m });
+      } else {
+        const cur = byName.get(key);
+        cur.inputs = cur.inputs || m.inputs;
+        cur.outputs = cur.outputs || m.outputs;
+        cur.externalEntities = cur.externalEntities || m.externalEntities;
+        cur.dataStores = cur.dataStores || m.dataStores;
+      }
+    };
+    struct.forEach(push);
+    imports.forEach(push);
+    return [...byName.values()];
+  };
+
+  const ensureZipContext = async (buf) => {
+    if (profile.zipDerivedContext?.trim()) return;
+    try {
+      const { text } = await extractProjectZipContext(buf);
+      if (text) setProfile?.((current) => ({ ...current, zipDerivedContext: text }));
+    } catch {
+      /* non-fatal — Gemini still gets the signals + manual context */
+    }
+  };
+
+  const analyzeProject = async (buf) => {
+    setGenErr(null);
+    setGenMeta(null);
     setGenLoading(true);
     try {
-      const text = await gemini(apiKey, `You are a software architect doing threat-modeling prep. Infer logical modules / services from the repository information. Return ONLY valid JSON (no markdown): a single array of objects.
+      const signals = buf ? await runDeterministicSignals(buf) : { structural: { modules: [] }, imports: { modules: [] } };
+      if (buf) await ensureZipContext(buf);
+
+      const structCount = signals.structural?.modules?.length || 0;
+      const importCount = signals.imports?.modules?.length || 0;
+
+      if (!apiKey.trim()) {
+        const fallback = fallbackModulesFromSignals(signals);
+        if (!fallback.length) {
+          throw new Error("Add a Gemini API key (Settings) — no deterministic signals were detected to fall back to.");
+        }
+        setModules(applyRulesClassifier(normalizeModules(fallback)));
+        setGenMeta(`No API key — used deterministic signals only (${structCount} structural · ${importCount} import-cluster).`);
+        return;
+      }
+
+      const hint = [profile.repoUrl, profile.repoBranch && `branch: ${profile.repoBranch}`, profile.repoContext].filter(Boolean).join("\n");
+      const llmBundle = profileContextForLlm(profile).trim();
+      const signalsBlock = buf ? buildSignalsBlock(signals) : "(no project ZIP — running on metadata + pasted context only)";
+
+      if (!buf && !hint.trim() && !profile.description?.trim() && !profile.techStack?.trim() && !llmBundle) {
+        throw new Error("Upload a project ZIP, add a repository URL or pasted context, or fill description / stack so there is something to analyze.");
+      }
+
+      const prompt = `You are a software architect doing threat-modeling prep. Produce a clean module decomposition for the application below.
+
+GROUND-TRUTH SIGNALS (deterministic — extracted from the actual archive, NOT inferred):
+${signalsBlock}
+
+How to use the signals:
+- Treat module NAMES from the structural section as the source of truth for what physically exists in the build system. Prefer those names verbatim.
+- The import-clustered section shows what each folder actually depends on; use externals to populate "externalEntities" and use the cluster relationships to populate "outputs" (cross-module flows).
+- You MAY merge two signal entries that are obviously the same logical bounded context (e.g. "shared/utils" pulled into one consumer), and you MAY split an overly broad signal into smaller logical modules — but justify each invented name by tying it to a path / package shown in the ZIP context below. Do NOT invent modules that have no basis in the signals or the file index.
+- If the signals are sparse or empty, fall back to inferring from the metadata + ZIP file index.
 
 Repository URL: ${profile.repoUrl || "not specified"}
 Branch: ${profile.repoBranch || "default"}
@@ -831,22 +1102,45 @@ Type: ${profile.type}
 Stack: ${profile.techStack || "unspecified"}
 Description: ${profile.description || "none"}
 
-Each object MUST use these keys:
-- "name": string (concise module or service name)
-- "parentName": string (exact parent module name, or "" if top-level)
-- "externalEntities": string (comma-separated actors/systems this module talks to)
+Return ONLY valid JSON (no markdown): a single array of objects. Each object MUST use these keys:
+- "name": string (concise module or service name — prefer names from the signals)
+- "parentName": string (exact parent module name from this same array, or "" if top-level)
+- "externalEntities": string (comma-separated actors / external systems / npm packages this module talks to)
 - "inputs": string (comma-separated logical inputs)
-- "outputs": string (comma-separated logical outputs)
+- "outputs": string (comma-separated logical outputs, including cross-module flows)
 - "dataStores": string (comma-separated stores this module reads/writes)
 
-Produce 5–14 modules covering APIs, auth, data, async jobs, integrations as appropriate. Names must be unique. Parent names must refer to another module's name.`);
+Produce 5–14 modules. Names must be unique. Parent names must refer to another module's name in the array.`;
 
-      const parsed = parseJSON(text);
-      const rows = Array.isArray(parsed) ? parsed : parsed.modules || parsed.items;
-      const next = modulesFromAiJson(rows);
-      if (!next.length) throw new Error("Model returned no modules. Try adding more repository context or refining your description.");
+      let next = [];
+      let usedFallback = false;
+      try {
+        const text = await gemini(apiKey, prompt);
+        const parsed = parseJSON(text);
+        const rows = Array.isArray(parsed) ? parsed : parsed.modules || parsed.items;
+        next = modulesFromAiJson(rows);
+      } catch (llmErr) {
+        const fallback = fallbackModulesFromSignals(signals);
+        if (!fallback.length) throw llmErr;
+        next = normalizeModules(fallback);
+        usedFallback = true;
+        setGenErr(`Gemini call failed (${llmErr.message || llmErr}). Falling back to deterministic signals.`);
+      }
 
-      setModules(next);
+      if (!next.length) {
+        const fallback = fallbackModulesFromSignals(signals);
+        if (fallback.length) {
+          next = normalizeModules(fallback);
+          usedFallback = true;
+        } else {
+          throw new Error("Model returned no modules and no deterministic signals were available. Add more context or upload a ZIP.");
+        }
+      }
+
+      setModules(applyRulesClassifier(next));
+      const sourceLabel = usedFallback ? "deterministic fallback" : "Gemini · grounded";
+      const signalSummary = `${structCount} structural · ${importCount} import-cluster`;
+      setGenMeta(`${next.length} modules · ${sourceLabel} (signals: ${signalSummary})`);
     } catch (e) {
       setGenErr(e.message || String(e));
     } finally {
@@ -854,38 +1148,107 @@ Produce 5–14 modules covering APIs, auth, data, async jobs, integrations as ap
     }
   };
 
+  const onAnalyzeClick = () => {
+    const buf = zipBufferRef?.current;
+    analyzeProject(buf || null);
+  };
+
+  const onAnalyzeZipPicked = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    if (zipBufferRef) zipBufferRef.current = buf;
+    setProfile?.((current) => ({ ...current, zipFileName: current.zipFileName || file.name }));
+    await analyzeProject(buf);
+    event.target.value = "";
+  };
+
   return (
     <>
-      <SHdr n={2} title="Module Decomposition" sub="Generate modules from your repository with Gemini, or define them manually. Modules drive auto DFDs and the STRIDE questionnaire." />
+      <SHdr n={2} title="Module Decomposition" sub="One-click pipeline: deterministic signals (manifests, workspaces, import graph) are extracted from your ZIP and fed to Gemini as ground truth, so module names stay tied to what actually exists in the repo. Modules drive auto DFDs and the STRIDE questionnaire." />
 
       <div style={C.card}>
-        <div style={{ color: "#30d158", fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>FROM REPOSITORY</div>
+        <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>ANALYZE PROJECT (AI · GROUNDED)</div>
         <p style={{ color: "#64748b", fontSize: 13, marginBottom: 12, lineHeight: 1.55 }}>
-          Uses the repo fields from step 1 (URL + pasted context). This fills the module list below so Level-0 / Level-1 diagrams can be generated automatically on the next step. You can edit every row after generation.
+          Runs the deterministic extractors first (<strong style={{ color: "#cbd5e1" }}>package.json</strong> workspaces, <strong style={{ color: "#cbd5e1" }}>pnpm-workspace.yaml</strong>, <strong style={{ color: "#cbd5e1" }}>lerna.json</strong>, <strong style={{ color: "#cbd5e1" }}>pom.xml</strong>, <strong style={{ color: "#cbd5e1" }}>go.work</strong>, folder layout, plus JS/TS import graph) and then sends those names to Gemini as <strong style={{ color: "#cbd5e1" }}>ground-truth signals</strong> alongside the repo metadata. Gemini refines them into logical modules — merging, splitting, attaching inputs / outputs / data stores — without inventing names that don't exist. If the LLM call fails or returns nothing, the deterministic results are used as a safe fallback. Re-upload the ZIP below if you skipped Step 1.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+          <AiBtn onClick={onAnalyzeClick} loading={genLoading} label="Analyze project & generate modules" />
+          <input
+            ref={analyzeZipInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            onChange={onAnalyzeZipPicked}
+            disabled={genLoading}
+            style={{ fontSize: 12, color: "#94a3b8", maxWidth: "100%" }}
+          />
+        </div>
+        {genMeta && (
+          <div style={{ color: "#30d158", fontSize: 12, marginBottom: 8, fontFamily: "monospace" }}>{genMeta}</div>
+        )}
+        <Err msg={genErr} />
+      </div>
+
+      <div style={C.card}>
+        <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 11, marginBottom: 8 }}>COMPONENT TYPE CLASSIFICATION</div>
+        <p style={{ color: "#64748b", fontSize: 13, marginBottom: 12, lineHeight: 1.55 }}>
+          Each module is mapped to a typed component from the built-in library ({COMPONENT_LIBRARY.components.length} types) so we can attach pre-canned STRIDE threats and security requirements automatically. Rules ran when modules were generated. Use the AI fallback for anything still <strong style={{ color: "#cbd5e1" }}>Unclassified</strong>, or pick the type manually below.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <AiBtn onClick={generateFromRepo} loading={genLoading} label="Generate modules from repository" />
+          <button
+            type="button"
+            onClick={runAiClassifier}
+            disabled={aiClassifyLoading}
+            style={{ ...C.btn, ...C.btnP, display: "flex", gap: 8, alignItems: "center", opacity: aiClassifyLoading ? 0.5 : 1 }}
+          >
+            {aiClassifyLoading ? "Asking Gemini…" : "Classify unresolved with Gemini"}
+          </button>
+          <span style={{ color: "#64748b", fontSize: 12, fontFamily: "monospace" }}>
+            {modules.filter((m) => m.name.trim() && !m.componentType).length} unclassified · {modules.filter((m) => m.componentType).length} typed
+          </span>
         </div>
-        <Err msg={genErr} />
+        {aiClassifyMeta && <div style={{ color: "#30d158", fontSize: 12, marginTop: 8, fontFamily: "monospace" }}>{aiClassifyMeta}</div>}
+        <Err msg={aiClassifyErr} />
       </div>
 
       {modules.map((module, index) => {
         const parentOptions = modules.filter((candidate) => candidate.id !== module.id && candidate.name.trim());
         const children = modules.filter((candidate) => candidate.parentId === module.id && candidate.name.trim());
+        const component = getComponent(module.componentType);
+        const sourceLabel = ({
+          "user": "manual",
+          "classifier-rule": "rule",
+          "classifier-ai": "AI",
+          "stencil": "stencil"
+        })[module.componentTypeSource] || "";
+        const accentColor = component?.color || "#1e3a5f";
 
         return (
-          <div key={module.id} style={{ ...C.card, borderLeft: "3px solid #1e3a5f" }}>
+          <div key={module.id} style={{ ...C.card, borderLeft: `3px solid ${accentColor}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <div>
                 <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 12 }}>MODULE {String(index + 1).padStart(2, "0")}</div>
                 {(module.name || module.parentId) && <div style={{ color: "#475569", fontSize: 11, marginTop: 4 }}>{module.name ? moduleHierarchyName(module, modules) : "Top-level module"}</div>}
                 {!!children.length && <div style={{ color: "#334155", fontSize: 11, marginTop: 2 }}>Children: {children.map((child) => child.name).join(", ")}</div>}
+                {component && (
+                  <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <Tag label={`${component.category} · ${component.label}`} color={component.color} />
+                    {sourceLabel && <span style={{ color: "#334155", fontSize: 10, fontFamily: "monospace" }}>via {sourceLabel}</span>}
+                    <span style={{ color: "#334155", fontSize: 10, fontFamily: "monospace" }}>· {component.threats?.length || 0} threats · {component.securityRequirements?.length || 0} requirements</span>
+                  </div>
+                )}
               </div>
               {modules.length > 1 && <button onClick={() => removeModule(module.id)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 20, lineHeight: 1 }} type="button" aria-label="Remove module">x</button>}
             </div>
 
             <div style={C.g2}>
               <Fld label="Module Name *"><Inp value={module.name} onChange={(event) => updateModule(module.id, "name", event.target.value)} placeholder="e.g. User Authentication" /></Fld>
+              <Fld label="Component Type">
+                <Sel value={module.componentType || ""} onChange={(event) => updateModule(module.id, "componentType", event.target.value)}>
+                  <option value="">Unclassified</option>
+                  {componentOptions.map((opt) => <option key={opt.id} value={opt.id}>{opt.category} · {opt.label}</option>)}
+                </Sel>
+              </Fld>
               <Fld label="Sub-module Of">
                 <Sel value={module.parentId} onChange={(event) => updateModule(module.id, "parentId", event.target.value)}>
                   <option value="">Top-level module</option>
@@ -1132,9 +1495,50 @@ function Step4({ threats, setThreats, modules, apiKey, profile, trustBoundaries,
   const [severityFilter, setSeverityFilter] = useState("all");
   const [expanded, setExpanded] = useState(null);
   const [selectedElementId, setSelectedElementId] = useState("");
+  const [librarySeedMeta, setLibrarySeedMeta] = useState(null);
   const questionnaireElements = buildQuestionnaireElements(modules, trustBoundaries);
   const selectedElement = questionnaireElements.find((element) => element.id === selectedElementId) || questionnaireElements[0] || null;
   const questions = selectedElement ? (QUESTIONNAIRE[selectedElement.kind] || []) : [];
+
+  const typedModules = modules.filter((m) => m.componentType && m.name.trim());
+  const hasLibraryThreats = threats.some((t) => t.source === "library");
+  const expectedLibraryThreats = typedModules.reduce((total, m) => {
+    const c = getComponent(m.componentType);
+    return total + (c?.threats?.length || 0);
+  }, 0);
+
+  useEffect(() => {
+    if (hasLibraryThreats) return;
+    if (!typedModules.length) return;
+    setThreats((current) => {
+      if (current.some((t) => t.source === "library")) return current;
+      const idFactory = createThreatIdFactory(current);
+      return reseedLibraryThreats({
+        existingThreats: current,
+        modules: typedModules,
+        idFactory,
+        strideMeta,
+        dreadDefaults: defaultDreadScores()
+      });
+    });
+    setLibrarySeedMeta(`Seeded ${expectedLibraryThreats} threats from ${typedModules.length} typed components.`);
+  }, [hasLibraryThreats, typedModules.length, expectedLibraryThreats, setThreats]);
+
+  const reseedLibrary = () => {
+    setThreats((current) => {
+      const idFactory = createThreatIdFactory(current);
+      const next = reseedLibraryThreats({
+        existingThreats: current,
+        modules: typedModules,
+        idFactory,
+        strideMeta,
+        dreadDefaults: defaultDreadScores()
+      });
+      const added = next.filter((t) => t.source === "library").length;
+      setLibrarySeedMeta(`Re-seeded ${added} library threats from ${typedModules.length} typed components. Manual / questionnaire / AI threats preserved.`);
+      return next;
+    });
+  };
 
   const analyze = async () => {
     setLoading(true);
@@ -1300,12 +1704,32 @@ Return ONLY a valid JSON array (10-18 threats, all 6 STRIDE categories covered, 
   const sourceStyles = {
     gemini: { label: "AI", color: "#00b4d8" },
     manual: { label: "Manual", color: "#30d158" },
-    questionnaire: { label: "Questionnaire", color: "#a78bfa" }
+    questionnaire: { label: "Questionnaire", color: "#a78bfa" },
+    library: { label: "Library", color: "#ec4899" }
   };
 
   return (
     <>
-      <SHdr n={4} title="STRIDE Threat Analysis" sub="Use the guided questionnaire per DFD element, then review AI or manual threats and confirm what is actually relevant." />
+      <SHdr n={4} title="STRIDE Threat Analysis" sub="Library-seeded threats appear automatically per typed component. Add questionnaire-driven, AI, or manual threats on top, and confirm what is actually relevant." />
+
+      <div style={C.card}>
+        <div style={{ color: "#ec4899", fontFamily: "monospace", fontSize: 11, marginBottom: 10 }}>COMPONENT-LIBRARY SEEDED THREATS</div>
+        {typedModules.length === 0 ? (
+          <p style={{ color: "#64748b", fontSize: 13, lineHeight: 1.55, margin: 0 }}>
+            None of your modules are typed yet. Go back to <strong style={{ color: "#cbd5e1" }}>Step 2</strong> and assign a Component Type so we can attach the relevant STRIDE threats and security requirements.
+          </p>
+        ) : (
+          <>
+            <p style={{ color: "#64748b", fontSize: 13, marginBottom: 12, lineHeight: 1.55 }}>
+              {threats.filter((t) => t.source === "library").length} library threats currently attached, drawn from {typedModules.length} typed component{typedModules.length === 1 ? "" : "s"}. Re-seed if you changed component types in Step 2.
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <button onClick={reseedLibrary} style={{ ...C.btn, ...C.btnS, borderColor: "#ec4899", color: "#ec4899" }}>Re-seed library threats</button>
+              {librarySeedMeta && <span style={{ color: "#64748b", fontSize: 12, fontFamily: "monospace" }}>{librarySeedMeta}</span>}
+            </div>
+          </>
+        )}
+      </div>
 
       <div style={C.card}>
         <div style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: 11, marginBottom: 12 }}>GUIDED STRIDE QUESTIONNAIRE</div>
@@ -1574,10 +1998,35 @@ function Step5({ threats, setThreats, modules }) {
   );
 }
 
-function Step6({ profile, modules, threats, apiKey, mitigations, setMitigations, trustBoundaries, dfd }) {
+function Step6({ profile, modules, setModules, threats, apiKey, mitigations, setMitigations, trustBoundaries, dfd }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+  const [strideFilter, setStrideFilter] = useState("all");
+  const [expandedSource, setExpandedSource] = useState(null);
   const applicable = [...threats.filter((threat) => threat.status === "applicable")].sort((a, b) => averageScore(b.dreadScores) - averageScore(a.dreadScores));
+
+  const updateRequirement = (moduleId, instanceId, patch) => {
+    setModules((current) => current.map((m) => {
+      if (m.id !== moduleId) return m;
+      return {
+        ...m,
+        securityRequirements: (m.securityRequirements || []).map((r) => r.instanceId === instanceId ? { ...r, ...patch } : r)
+      };
+    }));
+  };
+
+  const bySource = modules
+    .filter((m) => m.name.trim())
+    .map((m) => {
+      const moduleThreats = threats.filter((t) => t.moduleId === m.id);
+      const filtered = strideFilter === "all" ? moduleThreats : moduleThreats.filter((t) => t.strideCategory === strideFilter);
+      return {
+        module: m,
+        threats: moduleThreats,
+        filteredThreats: filtered,
+        component: getComponent(m.componentType)
+      };
+    });
   const criticalCount = applicable.filter((threat) => averageScore(threat.dreadScores) > 8).length;
   const highCount = applicable.filter((threat) => {
     const score = averageScore(threat.dreadScores);
@@ -1652,6 +2101,157 @@ Return ONLY valid JSON (no markdown):
           {criticalCount > 0 && <> <strong style={{ color: "#ff2d55" }}>{criticalCount} Critical</strong> and <strong style={{ color: "#ff9f0a" }}>{highCount} High</strong> severity threats should be prioritized first.</>}
           {profile.compliance && <> Compliance scope: {profile.compliance}.</>}
         </p>
+      </div>
+
+      <div style={C.card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+          <div style={{ color: "#ec4899", fontFamily: "monospace", fontSize: 11, letterSpacing: 2 }}>THREATS BY SOURCE</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {["all", ...STRIDE.map((s) => s.id)].map((cat) => {
+              const stride = STRIDE.find((s) => s.id === cat);
+              const color = stride?.color || "#ec4899";
+              const active = strideFilter === cat;
+              return (
+                <button key={cat} onClick={() => setStrideFilter(cat)} style={{ padding: "3px 9px", borderRadius: 4, fontSize: 11, fontFamily: "monospace", cursor: "pointer", background: active ? color : "transparent", border: `1px solid ${color}`, color: active ? "#000" : "#94a3b8" }}>
+                  {cat === "all" ? "All" : cat}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <p style={{ color: "#64748b", fontSize: 12, marginBottom: 12 }}>Threats grouped by the module / component that owns them. Click a row to expand.</p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #1a2540" }}>
+                {["Source", "Component Type", "Threats", "Applicable", "Severity Mix"].map((heading) => (
+                  <th key={heading} style={{ padding: "8px 8px", textAlign: "left", color: "#475569", fontFamily: "monospace", fontWeight: 400 }}>{heading}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {bySource.map(({ module, threats: ts, filteredThreats, component }) => {
+                const isOpen = expandedSource === module.id;
+                const sevMix = ["Critical", "High", "Medium", "Low"].map((label) => {
+                  const c = ts.filter((t) => risk(averageScore(t.dreadScores)).label === label).length;
+                  if (!c) return null;
+                  const meta = risk(label === "Critical" ? 9 : label === "High" ? 7 : label === "Medium" ? 5 : 3);
+                  return <Tag key={label} label={`${label[0]}·${c}`} color={meta.color} bg={meta.bg} />;
+                }).filter(Boolean);
+
+                return (
+                  <Fragment key={module.id}>
+                    <tr style={{ borderBottom: "1px solid #0e1728", cursor: "pointer" }} onClick={() => setExpandedSource(isOpen ? null : module.id)}>
+                      <td style={{ padding: "10px 8px", color: "#cbd5e1", fontWeight: 500 }}>{isOpen ? "▾" : "▸"} {module.name}</td>
+                      <td style={{ padding: "10px 8px", color: component ? component.color : "#475569", fontFamily: "monospace", fontSize: 11 }}>
+                        {component ? `${component.category} · ${component.label}` : "Unclassified"}
+                      </td>
+                      <td style={{ padding: "10px 8px", color: "#e2e8f0", fontFamily: "monospace" }}>{filteredThreats.length}{strideFilter !== "all" && ` / ${ts.length}`}</td>
+                      <td style={{ padding: "10px 8px", color: "#30d158", fontFamily: "monospace" }}>{ts.filter((t) => t.status === "applicable").length}</td>
+                      <td style={{ padding: "10px 8px" }}>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{sevMix.length ? sevMix : <span style={{ color: "#334155", fontSize: 11 }}>—</span>}</div>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={5} style={{ padding: 0, background: "#080e1a" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                            <tbody>
+                              {filteredThreats.length === 0 && (
+                                <tr><td style={{ padding: "10px 16px", color: "#475569", fontSize: 12 }}>No threats for current filter.</td></tr>
+                              )}
+                              {filteredThreats.map((t) => {
+                                const stride = strideMeta(t.strideCategory);
+                                const score = +averageScore(t.dreadScores).toFixed(1);
+                                const sev = risk(score);
+                                return (
+                                  <tr key={t.id} style={{ borderBottom: "1px solid #0e1728" }}>
+                                    <td style={{ padding: "8px 16px", width: 60, color: "#334155", fontFamily: "monospace", fontSize: 11 }}>{t.id}</td>
+                                    <td style={{ padding: "8px 8px", width: 40 }}><Tag label={stride.id} color={stride.color} /></td>
+                                    <td style={{ padding: "8px 8px", color: "#cbd5e1" }}>{t.title}</td>
+                                    <td style={{ padding: "8px 8px", width: 90 }}><Tag label={`${sev.label} ${score}`} color={sev.color} bg={sev.bg} /></td>
+                                    <td style={{ padding: "8px 16px", width: 90, color: t.status === "applicable" ? "#30d158" : t.status === "not-applicable" ? "#64748b" : "#ff9f0a", fontFamily: "monospace", fontSize: 11 }}>{t.status}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {bySource.length === 0 && (
+                <tr><td colSpan={5} style={{ padding: 12, color: "#475569", fontSize: 12, textAlign: "center" }}>No modules defined yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={C.card}>
+        <div style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: 11, marginBottom: 10, letterSpacing: 2 }}>SECURITY REQUIREMENTS</div>
+        <p style={{ color: "#64748b", fontSize: 12, marginBottom: 12 }}>Component-library security controls grouped by source. Track status and link Jira tickets.</p>
+        {bySource.filter(({ module }) => (module.securityRequirements || []).length).length === 0 && (
+          <div style={{ color: "#475569", fontSize: 12, padding: "10px 0" }}>No security requirements yet — assign Component Types in Step 2 to attach the library's controls.</div>
+        )}
+        {bySource.map(({ module, component }) => {
+          const reqs = module.securityRequirements || [];
+          if (!reqs.length) return null;
+          const counts = reqs.reduce((acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }), {});
+          return (
+            <div key={module.id} style={{ borderBottom: "1px solid #141e30", marginBottom: 12, paddingBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+                <div>
+                  <span style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600 }}>{module.name}</span>
+                  {component && <span style={{ marginLeft: 8 }}><Tag label={component.label} color={component.color} /></span>}
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <Tag label={`Open ${counts.open || 0}`} color="#ff9f0a" />
+                  <Tag label={`Partial ${counts.partial || 0}`} color="#ffd60a" />
+                  <Tag label={`Closed ${counts.closed || 0}`} color="#30d158" />
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #1a2540" }}>
+                      {["Security Requirement", "Source", "Status", "Issue"].map((h) => (
+                        <th key={h} style={{ padding: "8px 8px", textAlign: "left", color: "#475569", fontFamily: "monospace", fontWeight: 400 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reqs.map((r) => {
+                      const statusColor = r.status === "closed" ? "#30d158" : r.status === "partial" ? "#ffd60a" : "#ff9f0a";
+                      return (
+                        <tr key={r.instanceId} style={{ borderBottom: "1px solid #0e1728" }}>
+                          <td style={{ padding: "8px 8px" }}>
+                            <div style={{ color: "#cbd5e1" }}>{r.title}</div>
+                            <div style={{ color: "#475569", fontSize: 11, marginTop: 2 }}>{r.description}</div>
+                            {r.controlFamily && <div style={{ color: "#334155", fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>{r.controlFamily}</div>}
+                          </td>
+                          <td style={{ padding: "8px 8px", color: "#94a3b8", fontSize: 11, whiteSpace: "nowrap" }}>{module.name}</td>
+                          <td style={{ padding: "8px 8px", width: 140 }}>
+                            <Sel value={r.status} onChange={(event) => updateRequirement(module.id, r.instanceId, { status: event.target.value })} style={{ padding: "5px 8px", fontSize: 11, color: statusColor, borderColor: statusColor }}>
+                              <option value="open">Open</option>
+                              <option value="partial">Partially Mitigated</option>
+                              <option value="closed">Closed</option>
+                            </Sel>
+                          </td>
+                          <td style={{ padding: "8px 8px", width: 130 }}>
+                            <Inp value={r.jiraKey || ""} onChange={(event) => updateRequirement(module.id, r.instanceId, { jiraKey: event.target.value })} placeholder="TJ-1234" style={{ padding: "5px 8px", fontSize: 11 }} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div style={C.card}>
@@ -1793,6 +2393,7 @@ Return ONLY valid JSON (no markdown):
 }
 
 export default function ThreatModeler() {
+  const zipBufferRef = useRef(null);
   const [workspace, setWorkspace] = useState("wizard");
   const [step, setStep] = useState(1);
   const [apiKey, setApiKey] = useState(DEFAULT_GEMINI_API_KEY);
@@ -1858,6 +2459,45 @@ export default function ThreatModeler() {
     );
   }
 
+  if (workspace === "designer") {
+    return (
+      <div style={{ ...C.root, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+      `}</style>
+        <div className="no-print" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 20px", borderBottom: "1px solid #1a2540", background: "#08101e" }}>
+          <button type="button" onClick={() => setWorkspace("wizard")} style={{ ...C.btn, ...C.btnS }}>Back to wizard</button>
+          <span style={{ color: "#64748b", fontSize: 12, fontFamily: "monospace", textAlign: "center", flex: 1 }}>Stencil designer — drag typed components onto the canvas to build the architecture</span>
+          <GeminiSettingsPopover apiKey={apiKey} setApiKey={setApiKey} open={geminiSettingsOpen} onOpenChange={setGeminiSettingsOpen} />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+          <StencilDesigner
+            initialModules={modules.filter((m) => m.componentType)}
+            onCancel={() => setWorkspace("wizard")}
+            onCommit={({ modules: designerModules }) => {
+              if (designerModules.length > 0) {
+                setModules(designerModules.map((m) => normalizeModule(m)));
+                setThreats((current) => {
+                  const idFactory = createThreatIdFactory(current);
+                  return reseedLibraryThreats({
+                    existingThreats: current,
+                    modules: designerModules,
+                    idFactory,
+                    strideMeta,
+                    dreadDefaults: defaultDreadScores()
+                  });
+                });
+              }
+              setWorkspace("wizard");
+              setStep((current) => current < 2 ? 2 : current);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={C.root}>
       <style>{`
@@ -1909,8 +2549,8 @@ export default function ThreatModeler() {
       </div>
 
       <main style={C.main} className="grid2 grid3">
-        {step === 1 && <Step1 profile={profile} setProfile={setProfile} />}
-        {step === 2 && <Step2 modules={modules} setModules={setModules} apiKey={apiKey} profile={profile} />}
+        {step === 1 && <Step1 profile={profile} setProfile={setProfile} zipBufferRef={zipBufferRef} onOpenDesigner={() => setWorkspace("designer")} />}
+        {step === 2 && <Step2 modules={modules} setModules={setModules} apiKey={apiKey} profile={profile} setProfile={setProfile} zipBufferRef={zipBufferRef} />}
         {step === 3 && (
           <Step3
             profile={profile}
@@ -1927,7 +2567,7 @@ export default function ThreatModeler() {
         )}
         {step === 4 && <Step4 threats={threats} setThreats={setThreats} modules={modules} apiKey={apiKey} profile={profile} trustBoundaries={trustBoundaries} questionnaireAnswers={questionnaireAnswers} setQuestionnaireAnswers={setQuestionnaireAnswers} />}
         {step === 5 && <Step5 threats={threats} setThreats={setThreats} modules={modules} />}
-        {step === 6 && <Step6 profile={profile} modules={modules} threats={threats} apiKey={apiKey} mitigations={mitigations} setMitigations={setMitigations} trustBoundaries={trustBoundaries} dfd={dfd} />}
+        {step === 6 && <Step6 profile={profile} modules={modules} setModules={setModules} threats={threats} apiKey={apiKey} mitigations={mitigations} setMitigations={setMitigations} trustBoundaries={trustBoundaries} dfd={dfd} />}
       </main>
 
       <footer style={C.foot} className="no-print">

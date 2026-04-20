@@ -1,0 +1,401 @@
+{
+  "version": 1,
+  "components": [
+    {
+      "id": "auth.login",
+      "label": "Login",
+      "category": "Authentication",
+      "icon": "login",
+      "color": "#4ade80",
+      "kind": "process",
+      "defaultInputs": "username, password, MFA code",
+      "defaultOutputs": "session token, JWT",
+      "defaultDataStores": "Users DB, Session Store",
+      "defaultExternalEntities": "End User",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["passport", "next-auth", "@auth0/auth0-react", "@auth0/nextjs-auth0", "firebase-auth", "msal", "okta-auth-js", "supertokens-node", "lucia"],
+        "fileRegex": ["(^|/)auth/", "(^|/)login\\.(tsx?|jsx?|py|go|java|rb)$", "signin", "session"],
+        "envKeys": ["AUTH0_", "OKTA_", "JWT_SECRET", "SESSION_SECRET"],
+        "nameKeywords": ["auth", "login", "signin", "session"]
+      },
+      "threats": [
+        { "id": "auth.login.brute", "stride": "S", "title": "Credential brute-force / stuffing", "attackVector": "Automated submission of common or breached username/password pairs against the login endpoint.", "defaultSeverity": "High" },
+        { "id": "auth.login.spoof", "stride": "S", "title": "Phishing or session fixation", "attackVector": "Attacker tricks user into authenticating in a session the attacker controls (forged subdomain, fixed session ID).", "defaultSeverity": "High" },
+        { "id": "auth.login.tamper", "stride": "T", "title": "JWT signature stripping / algorithm confusion", "attackVector": "Forged token with 'alg: none' or HS256/RS256 confusion if server accepts unsigned or weakly-signed tokens.", "defaultSeverity": "High" },
+        { "id": "auth.login.repud", "stride": "R", "title": "Insufficient login audit trail", "attackVector": "No structured success/failure logs with IP, UA, geo — disputed access cannot be reconstructed.", "defaultSeverity": "Medium" },
+        { "id": "auth.login.info", "stride": "I", "title": "Username enumeration via error timing or messages", "attackVector": "Different responses for 'unknown user' vs 'wrong password' (text or response time) leak valid accounts.", "defaultSeverity": "Medium" },
+        { "id": "auth.login.dos", "stride": "D", "title": "Account lockout abuse", "attackVector": "Attacker repeatedly fails logins with valid usernames to lock legitimate users out.", "defaultSeverity": "Medium" },
+        { "id": "auth.login.eop", "stride": "E", "title": "Privilege escalation via role claim tampering", "attackVector": "Client-trusted role claim in JWT or session lets a regular user impersonate admin if not server-verified.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "auth.login.req.rate", "title": "Rate limiting and account lockout", "description": "Per-IP and per-account throttling with exponential backoff and CAPTCHA after threshold.", "controlFamily": "OWASP ASVS 2.2.1" },
+        { "id": "auth.login.req.mfa", "title": "Multi-factor authentication", "description": "Require MFA (TOTP, WebAuthn, or push) for privileged accounts and offer it to all users.", "controlFamily": "OWASP ASVS 2.7" },
+        { "id": "auth.login.req.hash", "title": "Strong password hashing", "description": "Argon2id (preferred), bcrypt, or scrypt with per-user salt; never SHA-1/MD5/plaintext.", "controlFamily": "OWASP ASVS 2.4" },
+        { "id": "auth.login.req.session", "title": "Secure session tokens", "description": "Cryptographically random tokens, rotated on auth, HttpOnly + Secure + SameSite cookies, short TTL.", "controlFamily": "OWASP ASVS 3.2" },
+        { "id": "auth.login.req.audit", "title": "Authentication event logging", "description": "Log success and failure with timestamp, user, IP, UA; ship to immutable audit store.", "controlFamily": "OWASP ASVS 7.1" },
+        { "id": "auth.login.req.enum", "title": "Generic auth error responses", "description": "Identical response body and timing for unknown user vs bad password.", "controlFamily": "OWASP ASVS 2.2.4" }
+      ]
+    },
+    {
+      "id": "auth.logout",
+      "label": "Logout",
+      "category": "Authentication",
+      "icon": "logout",
+      "color": "#4ade80",
+      "kind": "process",
+      "defaultInputs": "session token",
+      "defaultOutputs": "session invalidation",
+      "defaultDataStores": "Session Store",
+      "defaultExternalEntities": "End User",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": [],
+        "fileRegex": ["logout", "signout"],
+        "envKeys": [],
+        "nameKeywords": ["logout", "signout"]
+      },
+      "threats": [
+        { "id": "auth.logout.tamper", "stride": "T", "title": "Client-only logout (server retains token)", "attackVector": "App clears local cookie/storage but server keeps JWT/session valid until expiry — stolen tokens stay live.", "defaultSeverity": "High" },
+        { "id": "auth.logout.repud", "stride": "R", "title": "No logout audit event", "attackVector": "Cannot prove when a session ended for incident reconstruction.", "defaultSeverity": "Low" },
+        { "id": "auth.logout.dos", "stride": "D", "title": "Mass session-revocation amplification", "attackVector": "Forged 'logout-all-devices' calls used to deny service to a target user.", "defaultSeverity": "Low" },
+        { "id": "auth.logout.eop", "stride": "E", "title": "CSRF-driven forced logout", "attackVector": "Attacker page triggers victim's browser to logout, then offers a fake login that captures credentials.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "auth.logout.req.serverInvalidate", "title": "Server-side session invalidation", "description": "Delete server-side session row or add token jti to a revocation list on logout.", "controlFamily": "OWASP ASVS 3.3" },
+        { "id": "auth.logout.req.csrf", "title": "CSRF protection on logout", "description": "Logout must require POST + CSRF token or SameSite=strict cookie.", "controlFamily": "OWASP ASVS 4.2.2" },
+        { "id": "auth.logout.req.audit", "title": "Logout event logging", "description": "Emit audit log on every logout (user, time, IP).", "controlFamily": "OWASP ASVS 7.1" }
+      ]
+    },
+    {
+      "id": "auth.forgotPassword",
+      "label": "Forgot Password",
+      "category": "Authentication",
+      "icon": "key",
+      "color": "#4ade80",
+      "kind": "process",
+      "defaultInputs": "email or username, reset token, new password",
+      "defaultOutputs": "reset email, new password hash",
+      "defaultDataStores": "Users DB, Reset Token Store",
+      "defaultExternalEntities": "End User, Email Provider",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["nodemailer", "@sendgrid/mail", "mailgun", "postmark", "resend"],
+        "fileRegex": ["forgot[-_]?password", "reset[-_]?password", "password[-_]?reset"],
+        "envKeys": ["SMTP_", "SENDGRID_", "MAILGUN_", "POSTMARK_"],
+        "nameKeywords": ["forgot", "reset"]
+      },
+      "threats": [
+        { "id": "auth.fp.spoof", "stride": "S", "title": "Reset token brute force or guessable tokens", "attackVector": "Short, sequential, or predictable reset tokens allow attacker to take over accounts.", "defaultSeverity": "Critical" },
+        { "id": "auth.fp.tamper", "stride": "T", "title": "Host-header injection in reset email", "attackVector": "Attacker manipulates Host header so the reset link points to attacker-controlled domain.", "defaultSeverity": "High" },
+        { "id": "auth.fp.info", "stride": "I", "title": "Account existence disclosure", "attackVector": "Different copy for 'we sent an email' vs 'no such user' enumerates valid emails.", "defaultSeverity": "Medium" },
+        { "id": "auth.fp.dos", "stride": "D", "title": "Email-bombing the user via reset spam", "attackVector": "Unlimited reset requests flood the victim's inbox and may incur SES costs.", "defaultSeverity": "Medium" },
+        { "id": "auth.fp.eop", "stride": "E", "title": "Reset bypass to admin accounts", "attackVector": "Reset flow that doesn't re-verify second factor lets attacker bypass MFA on takeover.", "defaultSeverity": "High" },
+        { "id": "auth.fp.repud", "stride": "R", "title": "No audit trail on password change", "attackVector": "Cannot prove who initiated/completed the reset; victim cannot dispute the takeover.", "defaultSeverity": "Medium" },
+        { "id": "auth.fp.weakpw", "stride": "T", "title": "Weak password accepted on reset", "attackVector": "Reset flow does not enforce the same password policy as registration.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "auth.fp.req.entropy", "title": "High-entropy single-use reset token", "description": "128-bit random token, single-use, expires in <=15 minutes, invalidated after success.", "controlFamily": "OWASP ASVS 2.5.1" },
+        { "id": "auth.fp.req.sanitization", "title": "Input sanitization on email field", "description": "Validate RFC-5322 format and normalize before lookup; reject control chars in headers.", "controlFamily": "OWASP ASVS 5.1" },
+        { "id": "auth.fp.req.validation", "title": "Input validation on new password", "description": "Enforce min length 12, breach-list check, and policy parity with registration.", "controlFamily": "OWASP ASVS 5.1.3" },
+        { "id": "auth.fp.req.recycle", "title": "Recycle / history checks", "description": "Prevent reuse of last N passwords; force re-auth before allowing reset of MFA.", "controlFamily": "OWASP ASVS 2.1.7" },
+        { "id": "auth.fp.req.policy", "title": "Strict password policy", "description": "Apply same length, complexity, and breached-credential check used at registration.", "controlFamily": "OWASP ASVS 2.1.1" },
+        { "id": "auth.fp.req.host", "title": "Allow-list reset link host", "description": "Build reset URL from server-side allow-listed origin, never from request Host header.", "controlFamily": "OWASP ASVS 4.1.5" },
+        { "id": "auth.fp.req.audit", "title": "Audit reset events", "description": "Log request, email send, success/failure, and notify the account email of any password change.", "controlFamily": "OWASP ASVS 7.1.1" }
+      ]
+    },
+    {
+      "id": "auth.registration",
+      "label": "Registration",
+      "category": "Authentication",
+      "icon": "user-plus",
+      "color": "#4ade80",
+      "kind": "process",
+      "defaultInputs": "email, password, profile data, CAPTCHA",
+      "defaultOutputs": "user record, verification email",
+      "defaultDataStores": "Users DB",
+      "defaultExternalEntities": "End User, Email Provider",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": [],
+        "fileRegex": ["(^|/)signup", "(^|/)register"],
+        "envKeys": ["RECAPTCHA_", "HCAPTCHA_"],
+        "nameKeywords": ["signup", "register", "registration"]
+      },
+      "threats": [
+        { "id": "auth.reg.spoof", "stride": "S", "title": "Bot-driven fake account creation", "attackVector": "Headless browser farms create fake users for spam, fraud, or resource abuse.", "defaultSeverity": "High" },
+        { "id": "auth.reg.tamper", "stride": "T", "title": "Mass-assignment of admin/role fields", "attackVector": "Client posts extra fields (role=admin, isVerified=true) that ORM blindly assigns.", "defaultSeverity": "Critical" },
+        { "id": "auth.reg.info", "stride": "I", "title": "Email enumeration on signup", "attackVector": "'Email already in use' message reveals registered accounts.", "defaultSeverity": "Medium" },
+        { "id": "auth.reg.dos", "stride": "D", "title": "Storage exhaustion via rapid signups", "attackVector": "Unrate-limited registration fills Users DB and downstream queues.", "defaultSeverity": "Medium" },
+        { "id": "auth.reg.weakpw", "stride": "T", "title": "Weak / breached password accepted", "attackVector": "No length minimum or HIBP check lets users set trivially crackable passwords.", "defaultSeverity": "High" },
+        { "id": "auth.reg.eop", "stride": "E", "title": "Self-promotion to elevated role", "attackVector": "Default role logic (e.g., first user becomes admin) abused via race or reset.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "auth.reg.req.captcha", "title": "Bot mitigation", "description": "CAPTCHA, proof-of-work, or invisible bot scoring on signup endpoint.", "controlFamily": "OWASP ASVS 11.1.4" },
+        { "id": "auth.reg.req.allowlist", "title": "Server-side field allow-list", "description": "Bind only explicit fields from request body; never pass req.body straight to ORM.", "controlFamily": "OWASP ASVS 5.1.2" },
+        { "id": "auth.reg.req.policy", "title": "Strong password policy + breach check", "description": "Min 12 chars, allow long passphrases, reject HIBP-known passwords.", "controlFamily": "OWASP ASVS 2.1" },
+        { "id": "auth.reg.req.verify", "title": "Email verification before privileged use", "description": "Gate sensitive actions until address ownership is proven via signed link.", "controlFamily": "OWASP ASVS 2.2.6" },
+        { "id": "auth.reg.req.rate", "title": "Per-IP and per-email rate limit", "description": "Throttle signups per IP, ASN, and email domain to slow abuse.", "controlFamily": "OWASP ASVS 11.1.4" }
+      ]
+    },
+    {
+      "id": "data.database",
+      "label": "Database",
+      "category": "Data",
+      "icon": "database",
+      "color": "#a78bfa",
+      "kind": "store",
+      "defaultInputs": "queries, writes",
+      "defaultOutputs": "result sets",
+      "defaultDataStores": "",
+      "defaultExternalEntities": "Application services",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["pg", "mysql", "mysql2", "mongodb", "mongoose", "sequelize", "prisma", "typeorm", "knex", "psycopg2", "sqlalchemy", "django", "go-sql-driver/mysql", "gorm.io/gorm"],
+        "fileRegex": ["(^|/)(db|database|repository|repositories|models|schema|migrations)/", "schema\\.prisma$"],
+        "envKeys": ["DATABASE_URL", "DB_HOST", "POSTGRES_", "MYSQL_", "MONGO_"],
+        "nameKeywords": ["db", "database", "repo", "model", "store"]
+      },
+      "threats": [
+        { "id": "data.db.spoof", "stride": "S", "title": "Spoofed DB client / shared credentials", "attackVector": "Shared password reused across services lets a compromised service impersonate another caller.", "defaultSeverity": "High" },
+        { "id": "data.db.tamper", "stride": "T", "title": "SQL / NoSQL injection", "attackVector": "Concatenated user input into query string allows arbitrary read/write/admin actions.", "defaultSeverity": "Critical" },
+        { "id": "data.db.repud", "stride": "R", "title": "No row-level audit trail", "attackVector": "Mutations cannot be attributed to a user/service; deletions cannot be reconstructed.", "defaultSeverity": "Medium" },
+        { "id": "data.db.info", "stride": "I", "title": "Backups or snapshots leak PII", "attackVector": "Backups stored unencrypted, in public buckets, or restorable by over-privileged ops accounts.", "defaultSeverity": "High" },
+        { "id": "data.db.dos", "stride": "D", "title": "Unbounded query or connection exhaustion", "attackVector": "Missing LIMIT, no pool cap, or no statement_timeout lets one query starve the cluster.", "defaultSeverity": "High" },
+        { "id": "data.db.eop", "stride": "E", "title": "Over-privileged DB user", "attackVector": "App connects as superuser instead of least-privileged role; SQLi becomes RCE on the DB host.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "data.db.req.params", "title": "Parameterized queries / ORM only", "description": "No string concatenation; use prepared statements or vetted ORM query builders everywhere.", "controlFamily": "OWASP ASVS 5.3.4" },
+        { "id": "data.db.req.leastpriv", "title": "Least-privilege DB role", "description": "Per-service DB user with only required SELECT/INSERT/UPDATE on owned tables. Admin tasks use a separate role.", "controlFamily": "OWASP ASVS 1.4.1" },
+        { "id": "data.db.req.encryptRest", "title": "Encryption at rest", "description": "Storage-level (TDE) and application-level encryption for PII columns; managed KMS keys.", "controlFamily": "OWASP ASVS 6.2" },
+        { "id": "data.db.req.encryptTransit", "title": "TLS for DB connections", "description": "Enforce TLS 1.2+ between app and DB; pin server certificate where supported.", "controlFamily": "OWASP ASVS 9.1" },
+        { "id": "data.db.req.backups", "title": "Encrypted, access-controlled backups", "description": "Encrypted backups, MFA-gated restore, periodic restore tests, retention policy.", "controlFamily": "OWASP ASVS 8.3" },
+        { "id": "data.db.req.audit", "title": "DML audit log", "description": "Log who/what/when for sensitive tables (users, roles, payments) to immutable store.", "controlFamily": "OWASP ASVS 7.1" }
+      ]
+    },
+    {
+      "id": "data.cache",
+      "label": "Cache",
+      "category": "Data",
+      "icon": "zap",
+      "color": "#a78bfa",
+      "kind": "store",
+      "defaultInputs": "cache reads/writes",
+      "defaultOutputs": "cached values",
+      "defaultDataStores": "",
+      "defaultExternalEntities": "Application services",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": ["redis", "ioredis", "memcached", "node-cache", "lru-cache", "django-redis"],
+        "fileRegex": ["(^|/)(cache|caches)/"],
+        "envKeys": ["REDIS_URL", "MEMCACHED_"],
+        "nameKeywords": ["cache", "redis", "memcache"]
+      },
+      "threats": [
+        { "id": "data.cache.spoof", "stride": "S", "title": "Unauthenticated cache access", "attackVector": "Redis/memcached exposed without AUTH or on public network — anyone can read/write keys.", "defaultSeverity": "High" },
+        { "id": "data.cache.tamper", "stride": "T", "title": "Cache poisoning", "attackVector": "Attacker influences cache keys (e.g. via header manipulation) so other users receive forged data.", "defaultSeverity": "High" },
+        { "id": "data.cache.info", "stride": "I", "title": "Sensitive data cached in plaintext", "attackVector": "Tokens, PII, or session data stored in cache without encryption / appropriate TTL.", "defaultSeverity": "Medium" },
+        { "id": "data.cache.dos", "stride": "D", "title": "Cache stampede / unbounded keys", "attackVector": "Hot key expiry triggers thundering herd; unbounded key creation fills memory.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "data.cache.req.auth", "title": "Authenticated cache + private network", "description": "Require AUTH/ACL; bind to private subnet or VPC peer; never expose 6379 publicly.", "controlFamily": "OWASP ASVS 1.4" },
+        { "id": "data.cache.req.keying", "title": "Server-derived cache keys", "description": "Build keys from canonical, server-trusted fields; never echo raw user header values into keys.", "controlFamily": "OWASP ASVS 5.1.4" },
+        { "id": "data.cache.req.ttl", "title": "Bounded TTL and size for sensitive entries", "description": "Short TTL for tokens/PII; eviction policy to cap memory; avoid caching responses with Set-Cookie.", "controlFamily": "OWASP ASVS 8.2" }
+      ]
+    },
+    {
+      "id": "integration.paymentGateway",
+      "label": "Payment Gateway",
+      "category": "Integrations",
+      "icon": "credit-card",
+      "color": "#ec4899",
+      "kind": "externalEntity",
+      "defaultInputs": "card token, amount, customer id",
+      "defaultOutputs": "transaction id, webhook events",
+      "defaultDataStores": "Payments DB, Webhook Log",
+      "defaultExternalEntities": "Stripe / Adyen / Razorpay",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["stripe", "@stripe/stripe-js", "razorpay", "braintree", "adyen", "paypal-rest-sdk", "@paypal/checkout-server-sdk", "square"],
+        "fileRegex": ["(^|/)(payment|payments|billing|checkout)/"],
+        "envKeys": ["STRIPE_", "RAZORPAY_", "BRAINTREE_", "ADYEN_", "PAYPAL_"],
+        "nameKeywords": ["payment", "billing", "checkout", "stripe", "razorpay"]
+      },
+      "threats": [
+        { "id": "int.pay.spoof", "stride": "S", "title": "Forged payment webhook", "attackVector": "Attacker POSTs fake 'payment.succeeded' webhooks to mark orders paid without signature verification.", "defaultSeverity": "Critical" },
+        { "id": "int.pay.tamper", "stride": "T", "title": "Client-controlled amount or currency", "attackVector": "Browser changes the amount field before submit; server trusts client value.", "defaultSeverity": "Critical" },
+        { "id": "int.pay.repud", "stride": "R", "title": "Missing transaction trail", "attackVector": "Disputes cannot be reconciled because request/response/webhook bodies aren't durably stored.", "defaultSeverity": "High" },
+        { "id": "int.pay.info", "stride": "I", "title": "PAN / CVV touches your servers", "attackVector": "Card data hits your logs or backend instead of going directly to the gateway via tokenization.", "defaultSeverity": "Critical" },
+        { "id": "int.pay.dos", "stride": "D", "title": "Payment-API rate limit exceeded by abuse", "attackVector": "Card-testing fraud floods the gateway, triggering provider rate limits and outages.", "defaultSeverity": "High" },
+        { "id": "int.pay.eop", "stride": "E", "title": "Refund/void abuse via missing authz", "attackVector": "Internal endpoints to refund or capture lack role checks; any logged-in user can refund others.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "int.pay.req.webhookSig", "title": "Verify webhook signatures", "description": "Verify gateway signature header on every webhook before any state change.", "controlFamily": "PCI-DSS 4.0 6.4.3" },
+        { "id": "int.pay.req.serverAmount", "title": "Server-computed amounts", "description": "Compute price/tax/fees server-side from product IDs; ignore client-sent totals.", "controlFamily": "OWASP ASVS 5.1.4" },
+        { "id": "int.pay.req.tokenize", "title": "Tokenized card capture", "description": "Use gateway-hosted fields / Elements so PAN never touches your server. SAQ-A scope.", "controlFamily": "PCI-DSS 4.0 3.4" },
+        { "id": "int.pay.req.idempotency", "title": "Idempotency keys", "description": "Send Idempotency-Key on every charge to prevent double-charges on retries.", "controlFamily": "OWASP ASVS 11.1.6" },
+        { "id": "int.pay.req.audit", "title": "Immutable transaction log", "description": "Append request, response, webhook events to write-once log with at-rest encryption.", "controlFamily": "OWASP ASVS 7.1" },
+        { "id": "int.pay.req.rbac", "title": "Role-gated refund/capture endpoints", "description": "Refund, void, capture require explicit role + step-up auth; deny by default.", "controlFamily": "OWASP ASVS 4.1" }
+      ]
+    },
+    {
+      "id": "integration.restApi",
+      "label": "Third-party REST API",
+      "category": "Integrations",
+      "icon": "globe",
+      "color": "#ec4899",
+      "kind": "externalEntity",
+      "defaultInputs": "outbound HTTP requests",
+      "defaultOutputs": "JSON responses",
+      "defaultDataStores": "API key vault",
+      "defaultExternalEntities": "Vendor API",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": ["axios", "got", "node-fetch", "undici", "ky", "requests", "httpx"],
+        "fileRegex": ["(^|/)(integrations?|clients?|vendors?)/"],
+        "envKeys": ["API_KEY", "API_TOKEN", "VENDOR_"],
+        "nameKeywords": ["client", "integration", "vendor", "external"]
+      },
+      "threats": [
+        { "id": "int.rest.spoof", "stride": "S", "title": "DNS / TLS hijack of vendor host", "attackVector": "Attacker MITMs the upstream API call without certificate pinning.", "defaultSeverity": "High" },
+        { "id": "int.rest.tamper", "stride": "T", "title": "SSRF via user-supplied URL", "attackVector": "App fetches a URL the user controls, hitting cloud metadata or internal services.", "defaultSeverity": "Critical" },
+        { "id": "int.rest.info", "stride": "I", "title": "API key leakage in logs / errors", "attackVector": "Outbound headers logged verbatim, or 5xx response includes Authorization header.", "defaultSeverity": "High" },
+        { "id": "int.rest.dos", "stride": "D", "title": "Vendor outage cascades", "attackVector": "No timeout / circuit breaker — slow vendor stalls all worker threads.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "int.rest.req.tls", "title": "Strict TLS for outbound", "description": "TLS 1.2+, validate certificate chain, optional pinning for high-trust providers.", "controlFamily": "OWASP ASVS 9.1" },
+        { "id": "int.rest.req.ssrf", "title": "SSRF allow-list", "description": "Outbound URLs validated against allow-list, deny RFC1918 / metadata IPs and DNS rebinding.", "controlFamily": "OWASP ASVS 12.6" },
+        { "id": "int.rest.req.secrets", "title": "Secret manager for API keys", "description": "Keys stored in vault / parameter store; rotated; never in repo or logs.", "controlFamily": "OWASP ASVS 6.4" },
+        { "id": "int.rest.req.timeout", "title": "Timeouts and circuit breakers", "description": "Per-request timeout, retry budget, circuit breaker, bulkhead.", "controlFamily": "OWASP ASVS 11.1.6" }
+      ]
+    },
+    {
+      "id": "api.publicEndpoint",
+      "label": "Public REST API",
+      "category": "API",
+      "icon": "server",
+      "color": "#00b4d8",
+      "kind": "process",
+      "defaultInputs": "HTTP requests",
+      "defaultOutputs": "JSON responses",
+      "defaultDataStores": "Application DB",
+      "defaultExternalEntities": "End User, Mobile App, Partner",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["express", "koa", "fastify", "@nestjs/core", "hapi", "flask", "fastapi", "django", "gin-gonic/gin", "spring-boot"],
+        "fileRegex": ["(^|/)(api|routes|controllers|handlers)/", "router"],
+        "envKeys": ["PORT", "API_BASE_URL"],
+        "nameKeywords": ["api", "service", "router", "controller"]
+      },
+      "threats": [
+        { "id": "api.spoof", "stride": "S", "title": "Missing or weak API authentication", "attackVector": "Endpoints accept requests without verifying caller identity (no JWT, no mTLS, no API key).", "defaultSeverity": "High" },
+        { "id": "api.tamper", "stride": "T", "title": "Mass assignment / unsafe deserialization", "attackVector": "Body-binding accepts unintended fields; deserializer instantiates dangerous classes.", "defaultSeverity": "High" },
+        { "id": "api.info", "stride": "I", "title": "Verbose errors leak stack/secret", "attackVector": "5xx returns stack trace, query, or env vars to caller.", "defaultSeverity": "Medium" },
+        { "id": "api.idor", "stride": "I", "title": "IDOR / broken object-level authorization", "attackVector": "GET /api/orders/{id} returns any order regardless of caller; relies on guessable IDs.", "defaultSeverity": "Critical" },
+        { "id": "api.dos", "stride": "D", "title": "No global rate limiting", "attackVector": "Single client floods the API, exhausting CPU / DB pool.", "defaultSeverity": "High" },
+        { "id": "api.eop", "stride": "E", "title": "Broken function-level authorization", "attackVector": "Admin routes guarded only by being unlisted; direct URL grants admin to anyone.", "defaultSeverity": "Critical" }
+      ],
+      "securityRequirements": [
+        { "id": "api.req.authn", "title": "Authenticated by default", "description": "Deny-by-default: every route requires authn middleware unless explicitly public.", "controlFamily": "OWASP ASVS 4.1.1" },
+        { "id": "api.req.authz", "title": "Object-level authorization checks", "description": "Every read/write of a resource verifies the caller owns or is granted access to that exact object.", "controlFamily": "OWASP ASVS 4.2.1 / OWASP API #1" },
+        { "id": "api.req.input", "title": "Schema-validated input", "description": "Validate all bodies/queries against a schema (zod, JSON Schema, pydantic); reject extras.", "controlFamily": "OWASP ASVS 5.1.3" },
+        { "id": "api.req.rate", "title": "Rate limiting + WAF", "description": "Global and per-token rate limits; WAF for OWASP Top-10 patterns.", "controlFamily": "OWASP ASVS 11.1.4" },
+        { "id": "api.req.errors", "title": "Generic error responses", "description": "Production errors return correlation id only; stack traces only in private logs.", "controlFamily": "OWASP ASVS 7.4.1" },
+        { "id": "api.req.cors", "title": "Strict CORS allow-list", "description": "Allow-list specific origins; never reflect Origin; never combine '*' with credentials.", "controlFamily": "OWASP ASVS 14.5" }
+      ]
+    },
+    {
+      "id": "queue.messageBroker",
+      "label": "Message Queue",
+      "category": "Async",
+      "icon": "queue",
+      "color": "#ff9f0a",
+      "kind": "store",
+      "defaultInputs": "produced messages",
+      "defaultOutputs": "consumed messages",
+      "defaultDataStores": "",
+      "defaultExternalEntities": "Producers, Consumers",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": ["amqplib", "@aws-sdk/client-sqs", "kafkajs", "bullmq", "bull", "rabbitmq", "celery", "kombu", "google-cloud/pubsub"],
+        "fileRegex": ["(^|/)(queue|queues|workers?|jobs?|tasks?|consumers?|producers?)/"],
+        "envKeys": ["RABBITMQ_", "AMQP_URL", "KAFKA_", "SQS_", "PUBSUB_"],
+        "nameKeywords": ["queue", "worker", "job", "consumer", "producer", "kafka", "sqs", "rabbit"]
+      },
+      "threats": [
+        { "id": "queue.spoof", "stride": "S", "title": "Unauthenticated producer/consumer", "attackVector": "Anyone on the network can publish messages or drain queues.", "defaultSeverity": "High" },
+        { "id": "queue.tamper", "stride": "T", "title": "Unsigned message payloads", "attackVector": "Compromised producer injects messages that consumers process as trusted.", "defaultSeverity": "High" },
+        { "id": "queue.info", "stride": "I", "title": "PII in message bodies / logs", "attackVector": "Sensitive fields in messages get logged in dead-letter queues or trace exporters.", "defaultSeverity": "Medium" },
+        { "id": "queue.dos", "stride": "D", "title": "Poison message / unbounded retry", "attackVector": "A malformed message loops forever, blocks the partition, or fills DLQ.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "queue.req.auth", "title": "AuthN/Z for producers and consumers", "description": "SASL/mTLS/IAM on the broker; per-topic ACLs; no shared 'guest' creds.", "controlFamily": "OWASP ASVS 4.1" },
+        { "id": "queue.req.sign", "title": "Message integrity", "description": "Sign or HMAC payloads; consumer verifies before acting.", "controlFamily": "OWASP ASVS 6.5" },
+        { "id": "queue.req.dlq", "title": "DLQ + retry caps", "description": "Bounded retry, DLQ, alerting; quarantine poison messages without blocking the partition.", "controlFamily": "OWASP ASVS 11.1.6" }
+      ]
+    },
+    {
+      "id": "storage.objectStore",
+      "label": "Object Storage",
+      "category": "Data",
+      "icon": "archive",
+      "color": "#a78bfa",
+      "kind": "store",
+      "defaultInputs": "uploads, signed-URL requests",
+      "defaultOutputs": "downloads, signed URLs",
+      "defaultDataStores": "",
+      "defaultExternalEntities": "End User, Application services",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["@aws-sdk/client-s3", "aws-sdk", "@google-cloud/storage", "@azure/storage-blob", "minio", "boto3"],
+        "fileRegex": ["(^|/)(uploads?|files?|storage|s3|blob|bucket)/"],
+        "envKeys": ["AWS_S3_", "S3_BUCKET", "GCS_", "AZURE_STORAGE_"],
+        "nameKeywords": ["s3", "bucket", "storage", "upload", "blob"]
+      },
+      "threats": [
+        { "id": "storage.spoof", "stride": "S", "title": "Public bucket / world-readable ACL", "attackVector": "Bucket misconfigured for public list/get; entire dataset indexed by scanners.", "defaultSeverity": "Critical" },
+        { "id": "storage.tamper", "stride": "T", "title": "Path traversal on upload", "attackVector": "Filename includes '../' segments, overwriting other users' files or system paths.", "defaultSeverity": "High" },
+        { "id": "storage.info", "stride": "I", "title": "Long-lived signed URLs leaked", "attackVector": "Signed URL with multi-day TTL ends up in referrer headers, share links, browser history.", "defaultSeverity": "High" },
+        { "id": "storage.dos", "stride": "D", "title": "Unbounded upload size / cost-DoS", "attackVector": "No size cap; attacker uploads multi-GB files to spike storage and egress bills.", "defaultSeverity": "Medium" },
+        { "id": "storage.eop", "stride": "E", "title": "Stored XSS / malicious file served", "attackVector": "User-uploaded HTML/SVG served with text/html on same origin runs attacker JS for victims.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "storage.req.private", "title": "Default-private buckets", "description": "Block public access at account + bucket level; deny ACL-based public grants.", "controlFamily": "OWASP ASVS 1.4" },
+        { "id": "storage.req.shortUrl", "title": "Short-lived signed URLs", "description": "Signed URLs expire in <=15 minutes; scope to single object and verb.", "controlFamily": "OWASP ASVS 4.1.4" },
+        { "id": "storage.req.validate", "title": "Validate upload metadata", "description": "Server-derived object key, content-type sniffed, size capped, malware scanned.", "controlFamily": "OWASP ASVS 12.1" },
+        { "id": "storage.req.serve", "title": "Serve via separate origin or CDN", "description": "User content served from a content-only domain with restrictive CSP and no auth cookies.", "controlFamily": "OWASP ASVS 14.4" }
+      ]
+    },
+    {
+      "id": "client.webApp",
+      "label": "Web App Client",
+      "category": "Client",
+      "icon": "browser",
+      "color": "#00b4d8",
+      "kind": "externalEntity",
+      "defaultInputs": "user actions",
+      "defaultOutputs": "API requests",
+      "defaultDataStores": "Browser storage",
+      "defaultExternalEntities": "End User",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": ["react", "react-dom", "vue", "@angular/core", "svelte", "next", "nuxt", "remix"],
+        "fileRegex": ["(^|/)(web|webapp|frontend|client|app|pages|components)/"],
+        "envKeys": ["VITE_", "NEXT_PUBLIC_", "REACT_APP_"],
+        "nameKeywords": ["web", "frontend", "client", "ui", "app"]
+      },
+      "threats": [
+        { "id": "client.web.tamper", "stride": "T", "title": "Cross-site scripting (XSS)", "attackVector": "Unsanitized user content rendered as HTML/attributes; dangerouslySetInnerHTML on untrusted data.", "defaultSeverity": "High" },
+        { "id": "client.web.spoof", "stride": "S", "title": "Cross-site request forgery (CSRF)", "attackVector": "State-changing request triggered by attacker page using victim cookies without CSRF check.", "defaultSeverity": "High" },
+        { "id": "client.web.info", "stride": "I", "title": "Secrets in client bundle", "attackVector": "API secrets, internal hostnames, or feature flags shipped in the JS bundle.", "defaultSeverity": "Medium" },
+        { "id": "client.web.eop", "stride": "E", "title": "Client-side authorization", "attackVector": "UI hides admin actions but server doesn't enforce — anyone calling the API directly succeeds.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "client.web.req.csp", "title": "Strict Content Security Policy", "description": "Nonce-based CSP, no 'unsafe-inline'; report-uri for violations.", "controlFamily": "OWASP ASVS 14.4.3" },
+        { "id": "client.web.req.escape", "title": "Output encoding everywhere", "description": "Use framework auto-escaping; ban raw HTML insertion of user data.", "controlFamily": "OWASP ASVS 5.3.3" },
+        { "id": "client.web.req.cookies", "title": "Secure cookie flags", "description": "HttpOnly, Secure, SameSite=Lax/Strict on all auth cookies.", "controlFamily": "OWASP ASVS 3.4" },
+        { "id": "client.web.req.serverAuthz", "title": "All authorization on server", "description": "Treat the client as untrusted — never enforce permissions in the browser only.", "controlFamily": "OWASP ASVS 4.1.1" }
+      ]
+    }
+  ]
+}
