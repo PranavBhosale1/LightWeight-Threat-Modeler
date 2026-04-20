@@ -1,0 +1,178 @@
+{
+  "process": [
+    {
+      "id": "proc-spoofing",
+      "strideCategory": "S",
+      "prompt": "Can an attacker impersonate this process or invoke it without strong authentication?",
+      "suggestedTitle": "Unauthorized invocation or impersonation of {{element}}",
+      "attackVectorHint": "Weak service authentication, stolen session, forged token, or insecure endpoint exposure."
+    },
+    {
+      "id": "proc-tampering",
+      "strideCategory": "T",
+      "prompt": "Can requests, configuration, or code paths for this process be modified in transit or at runtime?",
+      "suggestedTitle": "Tampering risk in {{element}} processing",
+      "attackVectorHint": "Parameter manipulation, insecure deserialization, code injection, or config drift."
+    },
+    {
+      "id": "proc-repudiation",
+      "strideCategory": "R",
+      "prompt": "Would this process be unable to prove who performed a sensitive action or when it happened?",
+      "suggestedTitle": "Insufficient auditability in {{element}}",
+      "attackVectorHint": "Missing logs, unsigned events, or unverifiable transaction traces."
+    },
+    {
+      "id": "proc-info-disclosure",
+      "strideCategory": "I",
+      "prompt": "Can this process expose secrets, PII, tokens, or internal responses to unauthorized actors?",
+      "suggestedTitle": "Sensitive data exposure via {{element}}",
+      "attackVectorHint": "Verbose errors, weak access control, unsafe responses, or insecure caches."
+    },
+    {
+      "id": "proc-dos",
+      "strideCategory": "D",
+      "prompt": "Can this process be overwhelmed, starved, or degraded through abusive traffic or expensive operations?",
+      "suggestedTitle": "Availability degradation against {{element}}",
+      "attackVectorHint": "Resource exhaustion, brute-force traffic, lock contention, or queue flooding."
+    },
+    {
+      "id": "proc-eop",
+      "strideCategory": "E",
+      "prompt": "Can a lower-privileged actor gain elevated access through this process?",
+      "suggestedTitle": "Privilege escalation path through {{element}}",
+      "attackVectorHint": "Broken authorization, role confusion, missing policy checks, or admin action abuse."
+    }
+  ],
+  "dataStore": [
+    {
+      "id": "store-spoofing",
+      "strideCategory": "S",
+      "prompt": "Can a fake client, service, or database identity connect to this data store?",
+      "suggestedTitle": "Spoofed access path to {{element}}",
+      "attackVectorHint": "Weak mutual auth, shared credentials, or missing server identity validation."
+    },
+    {
+      "id": "store-tampering",
+      "strideCategory": "T",
+      "prompt": "Can records in this data store be altered without authorization or integrity checks?",
+      "suggestedTitle": "Unauthorized data modification in {{element}}",
+      "attackVectorHint": "SQL injection, direct object access, weak ACLs, or missing integrity controls."
+    },
+    {
+      "id": "store-repudiation",
+      "strideCategory": "R",
+      "prompt": "Would it be hard to trace who changed, deleted, or viewed records in this data store?",
+      "suggestedTitle": "Weak non-repudiation for {{element}} access",
+      "attackVectorHint": "No audit trail, mutable logs, or incomplete change history."
+    },
+    {
+      "id": "store-info-disclosure",
+      "strideCategory": "I",
+      "prompt": "Can this data store leak confidential data through backups, snapshots, queries, or misconfiguration?",
+      "suggestedTitle": "Data disclosure risk in {{element}}",
+      "attackVectorHint": "Open buckets, overly broad queries, backup exposure, or plaintext sensitive data."
+    },
+    {
+      "id": "store-dos",
+      "strideCategory": "D",
+      "prompt": "Can this data store become unavailable or performance-bound in ways that break the application?",
+      "suggestedTitle": "Availability dependency on {{element}}",
+      "attackVectorHint": "Connection pool exhaustion, lock storms, storage saturation, or unbounded queries."
+    },
+    {
+      "id": "store-eop",
+      "strideCategory": "E",
+      "prompt": "Can access to this data store be used to gain broader privileges in the system?",
+      "suggestedTitle": "Privilege escalation via {{element}} access",
+      "attackVectorHint": "Admin tables, over-privileged accounts, or secrets stored alongside operational data."
+    }
+  ],
+  "externalEntity": [
+    {
+      "id": "entity-spoofing",
+      "strideCategory": "S",
+      "prompt": "Can this external actor or service be impersonated during interactions with the application?",
+      "suggestedTitle": "Spoofed external entity interacting with {{element}}",
+      "attackVectorHint": "Forged client identity, fake upstream service, or missing origin validation."
+    },
+    {
+      "id": "entity-tampering",
+      "strideCategory": "T",
+      "prompt": "Can this actor tamper with requests, payloads, or files before they are processed?",
+      "suggestedTitle": "Input tampering introduced by {{element}}",
+      "attackVectorHint": "Manipulated payloads, unsafe file uploads, or altered API parameters."
+    },
+    {
+      "id": "entity-repudiation",
+      "strideCategory": "R",
+      "prompt": "Could this external entity deny performing a sensitive action without reliable evidence?",
+      "suggestedTitle": "Repudiation risk from {{element}} actions",
+      "attackVectorHint": "Weak event attribution, missing signatures, or incomplete session records."
+    },
+    {
+      "id": "entity-info-disclosure",
+      "strideCategory": "I",
+      "prompt": "Can this entity gain access to information beyond what it should legitimately see?",
+      "suggestedTitle": "Unauthorized information exposure to {{element}}",
+      "attackVectorHint": "Broken access control, insecure APIs, or over-shared responses."
+    },
+    {
+      "id": "entity-dos",
+      "strideCategory": "D",
+      "prompt": "Can this actor or upstream dependency cause denial of service through volume or abusive behavior?",
+      "suggestedTitle": "Availability abuse originating from {{element}}",
+      "attackVectorHint": "Flooding, retry storms, malformed request bursts, or unbounded polling."
+    },
+    {
+      "id": "entity-eop",
+      "strideCategory": "E",
+      "prompt": "Can this entity leverage trusted integrations or broken authorization to gain more privileges than intended?",
+      "suggestedTitle": "External privilege escalation involving {{element}}",
+      "attackVectorHint": "Privilege confusion in federated auth, trust misuse, or over-broad integration scopes."
+    }
+  ],
+  "dataFlow": [
+    {
+      "id": "flow-spoofing",
+      "strideCategory": "S",
+      "prompt": "Can one end of this flow be spoofed or can the channel be trusted without verifying identity?",
+      "suggestedTitle": "Spoofed endpoint on flow {{element}}",
+      "attackVectorHint": "Unauthenticated requests, fake upstream, or weak channel authentication."
+    },
+    {
+      "id": "flow-tampering",
+      "strideCategory": "T",
+      "prompt": "Can data in this flow be modified before it reaches its destination?",
+      "suggestedTitle": "In-transit tampering on {{element}}",
+      "attackVectorHint": "MITM, missing signing, altered payloads, or downgrade paths."
+    },
+    {
+      "id": "flow-repudiation",
+      "strideCategory": "R",
+      "prompt": "Is there enough evidence to prove what was sent across this flow and by whom?",
+      "suggestedTitle": "Poor message accountability on {{element}}",
+      "attackVectorHint": "No transaction IDs, unsigned payloads, or missing delivery logs."
+    },
+    {
+      "id": "flow-info-disclosure",
+      "strideCategory": "I",
+      "prompt": "Can sensitive data leak through this flow because of weak transport or over-broad payload contents?",
+      "suggestedTitle": "Sensitive data leakage on {{element}}",
+      "attackVectorHint": "Plaintext transport, verbose payloads, weak ciphers, or misrouted data."
+    },
+    {
+      "id": "flow-dos",
+      "strideCategory": "D",
+      "prompt": "Can this flow be abused to congest queues, saturate bandwidth, or trigger expensive downstream work?",
+      "suggestedTitle": "Denial-of-service path on {{element}}",
+      "attackVectorHint": "Replay storms, queue floods, fan-out amplification, or oversized requests."
+    },
+    {
+      "id": "flow-eop",
+      "strideCategory": "E",
+      "prompt": "Can control over this flow be abused to reach systems or privileges beyond the sender's role?",
+      "suggestedTitle": "Privilege escalation enabled by {{element}}",
+      "attackVectorHint": "Broker abuse, confused deputy issues, or over-privileged service trust."
+    }
+  ]
+}
