@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import strideQuestionnaire from "./strideQuestionnaire.json";
 import ThreatModelerCanvas from "./ThreatModelerCanvas.jsx";
 import { extractProjectZipContext } from "./projectZipContext.js";
@@ -45,14 +45,93 @@ const Inp = (props) => <input {...props} style={{ ...C.inp, ...props.style }} />
 const Sel = ({ children, ...props }) => <select {...props} style={{ ...C.inp, ...props.style }}>{children}</select>;
 const Txt = (props) => <textarea {...props} style={{ ...C.inp, resize: "vertical", ...props.style }} />;
 const Fld = ({ label, children, span }) => <div style={{ marginBottom: 12, gridColumn: span ? "1/-1" : undefined }}><label style={C.label}>{label}</label>{children}</div>;
-const Err = ({ msg }) => msg ? <div style={{ background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 6, padding: "10px 14px", color: "#fca5a5", fontSize: 13, marginBottom: 12 }}>⚠ {msg}</div> : null;
+const Err = ({ msg }) => msg ? <div style={{ background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 6, padding: "10px 14px", color: "#fca5a5", fontSize: 13, marginBottom: 12 }}>Error: {msg}</div> : null;
 const Pill = ({ label, value, color }) => <div style={{ background: `${color}15`, border: `1px solid ${color}40`, borderRadius: 6, padding: "6px 16px", textAlign: "center", minWidth: 88 }}><div style={{ color, fontSize: 20, fontFamily: "monospace", fontWeight: 700 }}>{value}</div><div style={{ color: "#64748b", fontSize: 11 }}>{label}</div></div>;
 const Tag = ({ label, color, bg }) => <span style={{ background: bg || `${color}20`, color, padding: "2px 8px", borderRadius: 3, fontSize: 11, fontFamily: "monospace" }}>{label}</span>;
-const AiBtn = ({ onClick, loading, label, icon = "🤖", style }) => (
+const AiBtn = ({ onClick, loading, label, style }) => (
   <button onClick={onClick} disabled={loading} style={{ ...C.btn, ...C.btnP, flex: 1, display: "flex", gap: 8, alignItems: "center", justifyContent: "center", opacity: loading ? 0.5 : 1, ...style }}>
-    <span>{loading ? "⏳" : icon}</span>{loading ? "Processing with Gemini..." : label}
+    {loading ? "Processing with Gemini..." : label}
   </button>
 );
+
+function GeminiSettingsPopover({ apiKey, setApiKey, open, onOpenChange }) {
+  const [reveal, setReveal] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) onOpenChange(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open, onOpenChange]);
+
+  const panel = {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    width: 320,
+    maxWidth: "calc(100vw - 32px)",
+    background: "#0d1421",
+    border: "1px solid #1a2540",
+    borderRadius: 10,
+    padding: 16,
+    zIndex: 300,
+    boxShadow: "0 12px 40px rgba(0,0,0,.45)"
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        title="Settings — Gemini API key"
+        aria-label="Open settings"
+        aria-expanded={open}
+        style={{
+          ...C.btn,
+          ...C.btnS,
+          padding: "8px 14px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 8,
+          fontSize: 12,
+          lineHeight: 1,
+          borderColor: open ? "#00b4d8" : "#2a3a55",
+          background: open ? "rgba(0,180,216,.08)" : "transparent"
+        }}
+      >
+        Settings
+      </button>
+      {open && (
+        <div style={panel}>
+          <div style={{ color: "#ff9f0a", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>GEMINI API KEY</div>
+          <p style={{ color: "#475569", fontSize: 12, lineHeight: 1.5, marginBottom: 12 }}>
+            Optional — used for AI-assisted module generation, DFD analysis, STRIDE suggestions, and remediation. Configure here or via <code style={{ color: "#94a3b8" }}>VITE_GEMINI_API_KEY</code> in <code style={{ color: "#94a3b8" }}>.env</code>.
+          </p>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <Inp type={reveal ? "text" : "password"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="AIza..." style={{ flex: 1, fontFamily: "monospace", fontSize: 12 }} />
+            <button type="button" style={{ ...C.btn, ...C.btnS, padding: "9px 12px", flexShrink: 0 }} onClick={() => setReveal((v) => !v)} aria-label={reveal ? "Hide API key" : "Show API key"}>
+              {reveal ? "Hide" : "Show"}
+            </button>
+          </div>
+          <p style={{ color: "#334155", fontSize: 12, margin: "0 0 12px" }}>
+            Get a key at{" "}
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#00b4d8" }}>
+              aistudio.google.com
+            </a>
+            .
+          </p>
+          <button type="button" onClick={() => onOpenChange(false)} style={{ ...C.btn, ...C.btnP, width: "100%" }}>
+            Done
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const SHdr = ({ n, title, sub }) => (
   <div style={{ marginBottom: 20 }}>
@@ -589,8 +668,7 @@ function Level1DFDCanvas({ modules, trustBoundaries, svgId }) {
   );
 }
 
-function Step1({ apiKey, setApiKey, profile, setProfile }) {
-  const [show, setShow] = useState(false);
+function Step1({ profile, setProfile }) {
   const [zipLoading, setZipLoading] = useState(false);
   const [zipErr, setZipErr] = useState(null);
   const [zipMeta, setZipMeta] = useState(null);
@@ -629,18 +707,7 @@ function Step1({ apiKey, setApiKey, profile, setProfile }) {
 
   return (
     <>
-      <SHdr n={1} title="Application Profile" sub="Add your repository link and context, then describe the system. Gemini is optional until you generate modules or run analysis." />
-
-      <div style={C.card}>
-        <div style={{ color: "#ff9f0a", fontFamily: "monospace", fontSize: 12, marginBottom: 12 }}>OPTIONAL GEMINI API KEY</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Inp type={show ? "text" : "password"} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="AIza..." style={{ flex: 1, fontFamily: "monospace" }} />
-          <button style={{ ...C.btn, ...C.btnS, padding: "9px 12px" }} onClick={() => setShow((value) => !value)}>{show ? "🙈" : "👁"}</button>
-        </div>
-        <p style={{ color: "#334155", fontSize: 12, margin: "6px 0 0" }}>
-          Use this only for AI-assisted DFD analysis, threat suggestions, and remediation ideas. Get your key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#00b4d8" }}>aistudio.google.com</a>. For local dev you can set <code style={{ color: "#94a3b8" }}>VITE_GEMINI_API_KEY</code> in a <code style={{ color: "#94a3b8" }}>.env</code> file (see <code style={{ color: "#94a3b8" }}>.env.example</code>).
-        </p>
-      </div>
+      <SHdr n={1} title="Application Profile" sub="Add your repository link and context, then describe the system. Use Settings (top right) if you need a Gemini API key for AI-assisted steps." />
 
       <div style={C.card}>
         <div style={{ color: "#30d158", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>SOURCE REPOSITORY</div>
@@ -814,7 +881,7 @@ Produce 5–14 modules covering APIs, auth, data, async jobs, integrations as ap
                 {(module.name || module.parentId) && <div style={{ color: "#475569", fontSize: 11, marginTop: 4 }}>{module.name ? moduleHierarchyName(module, modules) : "Top-level module"}</div>}
                 {!!children.length && <div style={{ color: "#334155", fontSize: 11, marginTop: 2 }}>Children: {children.map((child) => child.name).join(", ")}</div>}
               </div>
-              {modules.length > 1 && <button onClick={() => removeModule(module.id)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</button>}
+              {modules.length > 1 && <button onClick={() => removeModule(module.id)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 20, lineHeight: 1 }} type="button" aria-label="Remove module">x</button>}
             </div>
 
             <div style={C.g2}>
@@ -1008,7 +1075,7 @@ Return:
         {crossBoundaryFlows.length === 0 && <div style={{ color: "#334155", fontSize: 13 }}>No flows are currently marked as crossing a manual trust boundary.</div>}
         {crossBoundaryFlows.map((flow) => (
           <div key={flow.id} style={{ padding: "10px 12px", background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 6, marginBottom: 8 }}>
-            <div style={{ color: "#fca5a5", fontSize: 12, fontFamily: "monospace", marginBottom: 4 }}>{flow.from} → {flow.to}</div>
+            <div style={{ color: "#fca5a5", fontSize: 12, fontFamily: "monospace", marginBottom: 4 }}>{flow.from}{" -> "}{flow.to}</div>
             <div style={{ color: "#94a3b8", fontSize: 12 }}>Boundary: {flow.boundaryNames.join(", ") || "Manual"}</div>
           </div>
         ))}
@@ -1036,7 +1103,7 @@ Return:
             <div style={{ color: "#ef4444", fontFamily: "monospace", fontSize: 11, marginBottom: 10 }}>AI HIGH-RISK FLOWS ({dfd.highRiskFlows.length})</div>
             {dfd.highRiskFlows.map((flow, index) => (
               <div key={index} style={{ padding: "10px 12px", background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.2)", borderRadius: 6, marginBottom: 8 }}>
-                <div style={{ color: "#fca5a5", fontSize: 12, fontFamily: "monospace", marginBottom: 4 }}>{flow.from} → {flow.to}</div>
+                <div style={{ color: "#fca5a5", fontSize: 12, fontFamily: "monospace", marginBottom: 4 }}>{flow.from}{" -> "}{flow.to}</div>
                 <div style={{ color: "#94a3b8", fontSize: 12 }}>{flow.risk}</div>
                 <div style={{ display: "flex", gap: 4, marginTop: 6, flexWrap: "wrap" }}>
                   {flow.strideCategories?.map((category) => <Tag key={category} label={category} color="#ef4444" />)}
@@ -1048,7 +1115,7 @@ Return:
           {dfd.securityNotes?.length > 0 && <div style={C.card}>
             <div style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: 11, marginBottom: 10 }}>SECURITY NOTES</div>
             {dfd.securityNotes.map((note, index) => (
-              <div key={index} style={{ color: "#94a3b8", fontSize: 13, padding: "5px 0", borderBottom: index < dfd.securityNotes.length - 1 ? "1px solid #141e30" : "none" }}>▸ {note}</div>
+              <div key={index} style={{ color: "#94a3b8", fontSize: 13, padding: "5px 0", borderBottom: index < dfd.securityNotes.length - 1 ? "1px solid #141e30" : "none" }}>- {note}</div>
             ))}
           </div>}
         </>
@@ -1350,13 +1417,13 @@ Return ONLY a valid JSON array (10-18 threats, all 6 STRIDE categories covered, 
                         <Tag label={`${stride.id} · ${stride.name}`} color={stride.color} />
                         <Tag label={source.label} color={source.color} />
                         <Tag label={severity.label} color={severity.color} bg={severity.bg} />
-                        <span style={{ color: "#334155", fontSize: 11 }}>→ {threat.moduleName || "Unassigned"}</span>
+                        <span style={{ color: "#334155", fontSize: 11 }}>to {threat.moduleName || "Unassigned"}</span>
                       </div>
                       <div style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 500 }}>{threat.title}</div>
                     </div>
                     <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                      {[["applicable", "✓", "#30d158"], ["review", "?", "#ff9f0a"], ["not-applicable", "✗", "#64748b"]].map(([status, label, color]) => (
-                        <button key={status} onClick={() => setStatus(threat.id, status)} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${threat.status === status ? color : "#1e2d4a"}`, background: threat.status === status ? `${color}22` : "transparent", color: threat.status === status ? color : "#334155", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+                      {[["applicable", "Ok", "#30d158"], ["review", "?", "#ff9f0a"], ["not-applicable", "No", "#64748b"]].map(([status, label, color]) => (
+                        <button key={status} onClick={() => setStatus(threat.id, status)} style={{ minWidth: 32, height: 28, padding: "0 6px", borderRadius: 4, border: `1px solid ${threat.status === status ? color : "#1e2d4a"}`, background: threat.status === status ? `${color}22` : "transparent", color: threat.status === status ? color : "#334155", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
                           {label}
                         </button>
                       ))}
@@ -1488,7 +1555,7 @@ function Step5({ threats, setThreats, modules }) {
               <div>
                 <span style={{ fontFamily: "monospace", fontSize: 11, color: "#334155", marginRight: 8 }}>{threat.id}</span>
                 <span style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 500 }}>{threat.title}</span>
-                <span style={{ color: "#334155", fontSize: 11, marginLeft: 8 }}>→ {threat.moduleName}</span>
+                <span style={{ color: "#334155", fontSize: 11, marginLeft: 8 }}>to {threat.moduleName}</span>
               </div>
               <Tag label={`${severity.label} · ${score}`} color={severity.color} bg={severity.bg} />
             </div>
@@ -1566,7 +1633,7 @@ Return ONLY valid JSON (no markdown):
       <SHdr n={6} title="Threat Modeling Report" sub="Review the final report, export machine-readable data, and use the prioritization matrix to recommend testing frequency." />
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        <AiBtn onClick={generate} loading={loading} label="Generate Remediation Recommendations" icon="💊" />
+        <AiBtn onClick={generate} loading={loading} label="Generate Remediation Recommendations" />
         <button onClick={exportJson} style={{ ...C.btn, ...C.btnS }}>Export JSON</button>
         <button onClick={() => window.print()} style={{ ...C.btn, ...C.btnS }}>Print / Save PDF</button>
       </div>
@@ -1694,7 +1761,7 @@ Return ONLY valid JSON (no markdown):
                   <Tag label={severity.label} color={severity.color} bg={severity.bg} />
                 </div>
               </div>
-              <div style={{ color: "#30d158", fontSize: 13, marginBottom: 8 }}>▸ {mitigation.shortFix}</div>
+              <div style={{ color: "#30d158", fontSize: 13, marginBottom: 8 }}>- {mitigation.shortFix}</div>
               {mitigation.recommendations?.map((recommendation, index) => <div key={index} style={{ color: "#94a3b8", fontSize: 12, padding: "3px 0", paddingLeft: 14 }}>{index + 1}. {recommendation}</div>)}
               {mitigation.securityControl && <div style={{ color: "#334155", fontSize: 11, marginTop: 8 }}>Control: <span style={{ color: "#475569" }}>{mitigation.securityControl}</span></div>}
             </div>
@@ -1719,7 +1786,7 @@ Return ONLY valid JSON (no markdown):
       </div>
 
       <div style={{ textAlign: "center", color: "#1e2d4a", fontSize: 11, fontFamily: "monospace", marginTop: 16 }}>
-        Generated by ThreatModeler v1.1 · STRIDE + DREAD Methodology · {new Date().toLocaleDateString()}
+        Generated by ThreatModeler v1.1 · {new Date().toLocaleDateString()}
       </div>
     </>
   );
@@ -1729,6 +1796,7 @@ export default function ThreatModeler() {
   const [workspace, setWorkspace] = useState("wizard");
   const [step, setStep] = useState(1);
   const [apiKey, setApiKey] = useState(DEFAULT_GEMINI_API_KEY);
+  const [geminiSettingsOpen, setGeminiSettingsOpen] = useState(false);
   const [profile, setProfile] = useState({
     name: "",
     type: "Web Application",
@@ -1770,13 +1838,15 @@ export default function ThreatModeler() {
         *{box-sizing:border-box;margin:0;padding:0}
       `}</style>
         <div className="no-print" style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 20px", borderBottom: "1px solid #1a2540", background: "#08101e" }}>
-          <button type="button" onClick={() => setWorkspace("wizard")} style={{ ...C.btn, ...C.btnS }}>← Guided wizard</button>
-          <span style={{ color: "#64748b", fontSize: 12, fontFamily: "monospace", textAlign: "center", flex: 1 }}>Interactive DFD canvas — draw components, connect flows, run STRIDE / DREAD and remediation</span>
-          <span style={{ width: 120 }} />
+          <button type="button" onClick={() => setWorkspace("wizard")} style={{ ...C.btn, ...C.btnS }}>Back to wizard</button>
+          <span style={{ color: "#64748b", fontSize: 12, fontFamily: "monospace", textAlign: "center", flex: 1 }}>Interactive DFD canvas: draw components, connect flows, analyze threats, and remediation</span>
+          <GeminiSettingsPopover apiKey={apiKey} setApiKey={setApiKey} open={geminiSettingsOpen} onOpenChange={setGeminiSettingsOpen} />
         </div>
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <ThreatModelerCanvas
             embedded
+            hideApiKeyInToolbar
+            onRequestApiKeySettings={() => setGeminiSettingsOpen(true)}
             apiKey={apiKey}
             setApiKey={setApiKey}
             initialAppName={profile.name}
@@ -1805,7 +1875,6 @@ export default function ThreatModeler() {
       <header style={C.hdr} className="no-print">
         <div style={C.hdrIn}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 22 }}>⚔️</span>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "monospace", letterSpacing: 1, color: "#e2e8f0" }}>ThreatModeler</div>
               <div style={{ fontSize: 10, color: "#334155", fontFamily: "monospace" }}>Lightweight Threat Modeling Tool · v1.1</div>
@@ -1814,9 +1883,9 @@ export default function ThreatModeler() {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
             {profile.name && <span style={{ color: "#334155", fontSize: 12, fontFamily: "monospace" }}>{profile.name}</span>}
             <button type="button" onClick={() => setWorkspace("canvas")} style={{ ...C.btn, ...C.btnS, fontSize: 11 }} title="Visual DFD editor with Gemini STRIDE analysis">
-              ⬡ Interactive canvas
+              Interactive canvas
             </button>
-            <span style={{ background: "rgba(0,180,216,.1)", border: "1px solid rgba(0,180,216,.3)", color: "#00b4d8", padding: "3px 10px", borderRadius: 4, fontSize: 11, fontFamily: "monospace" }}>STRIDE + DREAD</span>
+            <GeminiSettingsPopover apiKey={apiKey} setApiKey={setApiKey} open={geminiSettingsOpen} onOpenChange={setGeminiSettingsOpen} />
           </div>
         </div>
       </header>
@@ -1830,7 +1899,7 @@ export default function ThreatModeler() {
           return (
             <div key={n} style={{ display: "flex", alignItems: "center", cursor: done ? "pointer" : "default" }} onClick={() => done && setStep(n)}>
               <div style={{ width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontFamily: "monospace", flexShrink: 0, border: `1px solid ${active ? "#00b4d8" : done ? "#30d158" : "#1e2d4a"}`, background: active ? "rgba(0,180,216,.1)" : done ? "rgba(48,209,88,.1)" : "transparent", color: active ? "#00b4d8" : done ? "#30d158" : "#334155" }}>
-                {done ? "✓" : n}
+                {done ? "+" : n}
               </div>
               <span style={{ fontSize: 11, margin: "0 6px", fontFamily: "monospace", color: active ? "#00b4d8" : done ? "#30d158" : "#334155" }}>{label}</span>
               {index < steps.length - 1 && <div style={{ width: 24, height: 1, background: done ? "#30d158" : "#1a2540", margin: "0 2px" }} />}
@@ -1840,7 +1909,7 @@ export default function ThreatModeler() {
       </div>
 
       <main style={C.main} className="grid2 grid3">
-        {step === 1 && <Step1 apiKey={apiKey} setApiKey={setApiKey} profile={profile} setProfile={setProfile} />}
+        {step === 1 && <Step1 profile={profile} setProfile={setProfile} />}
         {step === 2 && <Step2 modules={modules} setModules={setModules} apiKey={apiKey} profile={profile} />}
         {step === 3 && (
           <Step3
@@ -1862,10 +1931,10 @@ export default function ThreatModeler() {
       </main>
 
       <footer style={C.foot} className="no-print">
-        <button style={{ ...C.btn, ...C.btnS }} onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1}>← Back</button>
+        <button style={{ ...C.btn, ...C.btnS }} onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1}>Back</button>
         <span style={{ color: "#1e2d4a", fontSize: 12, fontFamily: "monospace" }}>Step {step} / {steps.length}</span>
         {step < steps.length
-          ? <button style={{ ...C.btn, ...C.btnP, opacity: canNext() ? 1 : 0.4 }} onClick={() => canNext() && setStep((current) => current + 1)} disabled={!canNext()}>Continue →</button>
+          ? <button style={{ ...C.btn, ...C.btnP, opacity: canNext() ? 1 : 0.4 }} onClick={() => canNext() && setStep((current) => current + 1)} disabled={!canNext()}>Continue</button>
           : <button style={{ ...C.btn, ...C.btnP }} onClick={() => window.print()}>Print / Save PDF</button>}
       </footer>
     </div>

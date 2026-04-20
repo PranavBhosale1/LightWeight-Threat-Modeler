@@ -201,7 +201,7 @@ function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, o
             {/* Analyzing spinner */}
             {nd.analyzing && (
               <text textAnchor="middle" y={nd.h/2+15} fill="#00b4d8" fontSize={9} fontFamily="monospace" style={{pointerEvents:"none"}}>
-                analyzing…
+                analyzing...
               </text>
             )}
             {/* Threat badge */}
@@ -239,6 +239,8 @@ const Pill = ({label,value,color}) =>
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function ThreatModelerCanvas({
   embedded = false,
+  hideApiKeyInToolbar = false,
+  onRequestApiKeySettings,
   apiKey: apiKeyProp,
   setApiKey: setApiKeyProp,
   initialAppName,
@@ -307,7 +309,7 @@ export default function ThreatModelerCanvas({
 
   // Analyze single node
   const analyzeNode = async (nodeId) => {
-    if (!apiKey.trim()) { setError("Paste your Gemini API key first →"); setShowKey(true); return; }
+    if (!apiKey.trim()) { setError("Paste your Gemini API key first (Settings)."); (hideApiKeyInToolbar ? onRequestApiKeySettings?.() : setShowKey(true)); return; }
     const nd = nodes.find(n=>n.id===nodeId);
     if (!nd) return;
     updateNode(nodeId, {analyzing:true});
@@ -315,7 +317,7 @@ export default function ThreatModelerCanvas({
     try {
       const conns = edges.filter(e=>e.from===nodeId||e.to===nodeId).map(e=>{
         const other = nodes.find(x=>x.id===(e.from===nodeId?e.to:e.from));
-        return `${e.from===nodeId?"→":"←"} ${other?.label}`;
+        return `${e.from===nodeId?"->":"<-"} ${other?.label}`;
       }).join(", ");
       const txt = await gemini(apiKey,`STRIDE threat modeling expert. Identify threats for this DFD component.
 
@@ -339,7 +341,7 @@ Return ONLY valid JSON array — 5 to 8 specific, concrete threats:
 
   // Analyze all nodes
   const analyzeAll = async () => {
-    if (!apiKey.trim()) { setError("Paste your Gemini API key first"); setShowKey(true); return; }
+    if (!apiKey.trim()) { setError("Paste your Gemini API key first"); (hideApiKeyInToolbar ? onRequestApiKeySettings?.() : setShowKey(true)); return; }
     const valid = nodes.filter(n=>n.type!=="boundary");
     if (!valid.length) { setError("Add at least one component first"); return; }
     setAllLoading(true); setError(null);
@@ -377,7 +379,11 @@ Return ONLY valid JSON — object mapping each node's id to its threats array (4
 
   // Generate mitigations
   const generateMit = async () => {
-    if (!apiKey.trim()) return;
+    if (!apiKey.trim()) {
+      if (hideApiKeyInToolbar) onRequestApiKeySettings?.();
+      else setShowKey(true);
+      return;
+    }
     const threats = allApplicable;
     if (!threats.length) return;
     setMitLoading(true); setError(null);
@@ -438,7 +444,6 @@ Return ONLY valid JSON — map from threat id to remediation:
       <div style={{height:48,background:PANEL,borderBottom:`1px solid ${BDR}`,display:"flex",alignItems:"center",flexShrink:0,zIndex:10}}>
         {/* Brand */}
         <div style={{padding:"0 16px",display:"flex",alignItems:"center",gap:9,borderRight:`1px solid ${BDR}`,height:"100%",flexShrink:0}}>
-          <span style={{fontSize:16,lineHeight:1}}>⚔</span>
           <span style={{fontSize:12,fontWeight:600,fontFamily:"monospace",letterSpacing:1.5,color:TXT}}>THREATMODELER</span>
         </div>
         {/* App name */}
@@ -446,9 +451,9 @@ Return ONLY valid JSON — map from threat id to remediation:
           style={{background:"transparent",border:"none",color:TXT,fontSize:13,padding:"0 14px",height:"100%",minWidth:180,maxWidth:240,fontFamily:"'DM Sans',sans-serif"}}/>
         {/* Tabs */}
         <div style={{display:"flex",height:"100%",marginLeft:"auto"}}>
-          {tabBtn("canvas","⬡  Canvas")}
-          {tabBtn("threats","⚠  Threats")}
-          {tabBtn("report","⬕  Report")}
+          {tabBtn("canvas","Canvas")}
+          {tabBtn("threats","Threats")}
+          {tabBtn("report","Report")}
         </div>
         {/* Stats chips */}
         {allApplicable.length>0 && (
@@ -458,28 +463,29 @@ Return ONLY valid JSON — map from threat id to remediation:
             ))}
           </div>
         )}
-        {/* API Key */}
-        <div style={{padding:"0 12px",height:"100%",display:"flex",alignItems:"center",position:"relative",flexShrink:0}}>
-          <button onClick={()=>setShowKey(s=>!s)} style={{background:apiKey?"rgba(48,209,88,.1)":"rgba(239,68,68,.1)",border:`1px solid ${apiKey?"#30d158":"#ef4444"}`,color:apiKey?"#30d158":"#ef4444",padding:"3px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontFamily:"monospace",whiteSpace:"nowrap"}}>
-            {apiKey?"✓ Gemini":"⚠ Add Key"}
-          </button>
-          {showKey && (
-            <div style={{position:"absolute",top:52,right:0,background:PANEL,border:`1px solid ${BDR}`,borderRadius:8,padding:14,zIndex:200,width:270,boxShadow:"0 8px 32px rgba(0,0,0,.5)"}}>
-              <div style={{color:MUT,fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:1}}>GEMINI API KEY</div>
-              <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)}
-                placeholder="AIza…" style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"7px 9px",color:TXT,fontSize:12,fontFamily:"monospace"}}/>
-              <p style={{color:"#2a3d5a",fontSize:10,margin:"6px 0 8px"}}>Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color:ACT}}>aistudio.google.com</a></p>
-              <button onClick={()=>setShowKey(false)} style={{width:"100%",padding:6,background:ACT,border:"none",borderRadius:4,color:"#000",cursor:"pointer",fontSize:12,fontWeight:600}}>Done</button>
-            </div>
-          )}
-        </div>
+        {!hideApiKeyInToolbar && (
+          <div style={{padding:"0 12px",height:"100%",display:"flex",alignItems:"center",position:"relative",flexShrink:0}}>
+            <button onClick={()=>setShowKey(s=>!s)} style={{background:apiKey?"rgba(48,209,88,.1)":"rgba(239,68,68,.1)",border:`1px solid ${apiKey?"#30d158":"#ef4444"}`,color:apiKey?"#30d158":"#ef4444",padding:"3px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontFamily:"monospace",whiteSpace:"nowrap"}}>
+              {apiKey?"Gemini OK":"Add key"}
+            </button>
+            {showKey && (
+              <div style={{position:"absolute",top:52,right:0,background:PANEL,border:`1px solid ${BDR}`,borderRadius:8,padding:14,zIndex:200,width:270,boxShadow:"0 8px 32px rgba(0,0,0,.5)"}}>
+                <div style={{color:MUT,fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:1}}>GEMINI API KEY</div>
+                <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)}
+                  placeholder="AIza..." style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"7px 9px",color:TXT,fontSize:12,fontFamily:"monospace"}}/>
+                <p style={{color:"#2a3d5a",fontSize:10,margin:"6px 0 8px"}}>Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color:ACT}}>aistudio.google.com</a></p>
+                <button onClick={()=>setShowKey(false)} style={{width:"100%",padding:6,background:ACT,border:"none",borderRadius:4,color:"#000",cursor:"pointer",fontSize:12,fontWeight:600}}>Done</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Error */}
       {error && (
         <div style={{background:"rgba(239,68,68,.08)",borderBottom:"1px solid rgba(239,68,68,.25)",color:"#fca5a5",padding:"6px 16px",fontSize:12,display:"flex",justifyContent:"space-between",flexShrink:0}}>
-          ⚠ {error}
-          <button onClick={()=>setError(null)} style={{background:"none",border:"none",color:"#fca5a5",cursor:"pointer",fontSize:14}}>✕</button>
+          Error: {error}
+          <button onClick={()=>setError(null)} style={{background:"none",border:"none",color:"#fca5a5",cursor:"pointer",fontSize:14}} type="button" aria-label="Dismiss">x</button>
         </div>
       )}
 
@@ -510,7 +516,7 @@ Return ONLY valid JSON — map from threat id to remediation:
 
             <div style={{padding:"10px 10px 8px",borderBottom:`1px solid ${BDR}`}}>
               <div style={{color:MUT,fontSize:9,fontFamily:"monospace",letterSpacing:1.5,marginBottom:8}}>TOOLS</div>
-              {[{m:"select",l:"↖  Select",k:"Esc"},{m:"connect",l:"↔  Connect",k:""}].map(({m,l,k})=>(
+              {[{m:"select",l:"Select",k:"Esc"},{m:"connect",l:"Connect",k:""}].map(({m,l,k})=>(
                 <button key={m} onClick={()=>setMode(m)} style={{
                   width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",
                   padding:"7px 10px",marginBottom:4,background:mode===m?`${ACT}12`:"transparent",
@@ -524,13 +530,13 @@ Return ONLY valid JSON — map from threat id to remediation:
                 width:"100%",padding:"7px 10px",background:"transparent",
                 border:`1px solid ${selected?"#ef4444":BDR}`,borderRadius:5,
                 cursor:selected?"pointer":"default",color:selected?"#ef4444":MUT,fontSize:12
-              }}>✕  Delete  <span style={{color:MUT,fontSize:9,fontFamily:"monospace"}}>Del</span></button>
+              }}>Delete  <span style={{color:MUT,fontSize:9,fontFamily:"monospace"}}>Del</span></button>
             </div>
 
             <div style={{padding:"10px 10px 8px",borderBottom:`1px solid ${BDR}`}}>
               <div style={{color:MUT,fontSize:9,fontFamily:"monospace",letterSpacing:1.5,marginBottom:8}}>APP CONTEXT</div>
               <textarea value={appDesc} onChange={e=>setAppDesc(e.target.value)} placeholder="What does this app do?" style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,resize:"vertical",minHeight:52,fontFamily:"'DM Sans',sans-serif",marginBottom:6}}/>
-              <input value={appStack} onChange={e=>setAppStack(e.target.value)} placeholder="Tech stack…" style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,fontFamily:"'DM Sans',sans-serif"}}/>
+              <input value={appStack} onChange={e=>setAppStack(e.target.value)} placeholder="Tech stack..." style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,fontFamily:"'DM Sans',sans-serif"}}/>
             </div>
 
             <div style={{padding:"10px"}}>
@@ -539,7 +545,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                 border:`1px solid ${ACT}`,borderRadius:5,cursor:(allLoading||!nodes.length)?"default":"pointer",
                 color:allLoading?ACT:"#000",fontSize:12,fontWeight:600,transition:"all .15s"
               }}>
-                {allLoading?"⏳ Analyzing…":"🤖 Analyze All"}
+                {allLoading?"Analyzing...":"Analyze All"}
               </button>
               <div style={{color:MUT,fontSize:10,textAlign:"center",marginTop:7,fontFamily:"monospace"}}>
                 {nodes.length} nodes · {edges.length} flows
@@ -551,9 +557,9 @@ Return ONLY valid JSON — map from threat id to remediation:
           <div style={{flex:1,position:"relative",overflow:"hidden"}}>
             {nodes.length===0 && (
               <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none",gap:8}}>
-                <div style={{fontSize:48,opacity:.06}}>⊕</div>
+                <div style={{fontSize:48,opacity:.06}}>+</div>
                 <div style={{color:"#141e30",fontSize:13,fontFamily:"monospace"}}>Add components from the palette</div>
-                <div style={{color:"#0e1728",fontSize:11,fontFamily:"monospace"}}>Use Connect tool to draw data flows · Click nodes to analyze threats</div>
+                <div style={{color:"#0e1728",fontSize:11,fontFamily:"monospace"}}>Use Connect tool to draw data flows. Click nodes to analyze threats.</div>
               </div>
             )}
             <Canvas nodes={nodes} edges={edges} selectedId={selected} mode={mode}
@@ -570,7 +576,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                 <div style={{padding:"12px 14px",borderBottom:`1px solid ${BDR}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                     <span style={{color:selectedNode.color,fontSize:10,fontFamily:"monospace",letterSpacing:1}}>{selectedNode.type.toUpperCase()}</span>
-                    <button onClick={del} style={{background:"none",border:"none",color:MUT,cursor:"pointer",fontSize:16,lineHeight:1}}>✕</button>
+                    <button onClick={del} type="button" aria-label="Remove component" style={{background:"none",border:"none",color:MUT,cursor:"pointer",fontSize:16,lineHeight:1}}>x</button>
                   </div>
                   <input value={selectedNode.label} onChange={e=>updateNode(selected,{label:e.target.value})}
                     style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"7px 9px",color:TXT,fontSize:13,fontFamily:"'DM Sans',sans-serif"}}/>
@@ -584,7 +590,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                     </span>
                     <button onClick={()=>analyzeNode(selected)} disabled={selectedNode.analyzing}
                       style={{background:"transparent",border:`1px solid ${ACT}`,borderRadius:3,color:ACT,padding:"3px 9px",cursor:"pointer",fontSize:10,fontFamily:"monospace"}}>
-                      {selectedNode.analyzing?"…":"🤖 Analyze"}
+                      {selectedNode.analyzing?"...":"Analyze"}
                     </button>
                   </div>
 
@@ -601,9 +607,9 @@ Return ONLY valid JSON — map from threat id to remediation:
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
                             <Tag label={`${sc?.id} · ${sc?.name}`} color={sc?.color||"#fff"}/>
                             <div style={{display:"flex",gap:3}}>
-                              {[["applicable","✓","#30d158"],["not-applicable","✗","#ef4444"]].map(([s,l,c])=>(
+                              {[["applicable","Ok","#30d158"],["not-applicable","No","#ef4444"]].map(([s,l,c])=>(
                                 <button key={s} onClick={()=>setThreatStatus(selected,t.id,s)}
-                                  style={{width:20,height:20,borderRadius:3,border:`1px solid ${t.status===s?c:BDR}`,background:t.status===s?`${c}20`:"transparent",color:t.status===s?c:MUT,cursor:"pointer",fontSize:11}}>
+                                  style={{minWidth:26,height:22,padding:"0 4px",borderRadius:3,border:`1px solid ${t.status===s?c:BDR}`,background:t.status===s?`${c}20`:"transparent",color:t.status===s?c:MUT,cursor:"pointer",fontSize:10}}>
                                   {l}
                                 </button>
                               ))}
@@ -672,12 +678,12 @@ Return ONLY valid JSON — map from threat id to remediation:
           <div style={{maxWidth:900,margin:"0 auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <h2 style={{fontSize:16,fontWeight:600,fontFamily:"monospace",letterSpacing:1}}>THREAT REGISTER</h2>
-              <button onClick={()=>setView("canvas")} style={{padding:"6px 14px",background:"transparent",border:`1px solid ${BDR}`,borderRadius:4,color:MUT,cursor:"pointer",fontSize:12}}>← Canvas</button>
+              <button onClick={()=>setView("canvas")} style={{padding:"6px 14px",background:"transparent",border:`1px solid ${BDR}`,borderRadius:4,color:MUT,cursor:"pointer",fontSize:12}}>Back to Canvas</button>
             </div>
 
             {allApplicable.length===0 ? (
               <div style={{textAlign:"center",color:"#1e2d4a",padding:60,fontFamily:"monospace"}}>
-                No applicable threats — analyze your components on the canvas first.
+                No applicable threats - analyze your components on the canvas first.
               </div>
             ) : (<>
               <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
@@ -712,14 +718,14 @@ Return ONLY valid JSON — map from threat id to remediation:
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,flexWrap:"wrap",gap:6}}>
                       <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                         <Tag label={`${sc?.id} · ${sc?.name}`} color={sc?.color||"#fff"}/>
-                        <span style={{color:t.nodeColor,fontSize:11,fontFamily:"monospace"}}>⊙ {t.nodeLabel}</span>
+                        <span style={{color:t.nodeColor,fontSize:11,fontFamily:"monospace"}}>@ {t.nodeLabel}</span>
                       </div>
                       <div style={{display:"flex",gap:6,alignItems:"center"}}>
                         {s>0 && <Tag label={`${rv.label} · ${s}`} color={rv.color} bg={rv.bg}/>}
                         <div style={{display:"flex",gap:3}}>
-                          {[["applicable","✓","#30d158"],["not-applicable","✗","#ef4444"]].map(([st,l,c])=>(
+                          {[["applicable","Ok","#30d158"],["not-applicable","No","#ef4444"]].map(([st,l,c])=>(
                             <button key={st} onClick={()=>setThreatStatus(t.nodeId,t.id,st)}
-                              style={{width:22,height:22,borderRadius:3,border:`1px solid ${t.status===st?c:BDR}`,background:t.status===st?`${c}20`:"transparent",color:t.status===st?c:MUT,cursor:"pointer",fontSize:12}}>
+                              style={{minWidth:28,height:22,padding:"0 4px",borderRadius:3,border:`1px solid ${t.status===st?c:BDR}`,background:t.status===st?`${c}20`:"transparent",color:t.status===st?c:MUT,cursor:"pointer",fontSize:10}}>
                               {l}
                             </button>
                           ))}
@@ -762,9 +768,9 @@ Return ONLY valid JSON — map from threat id to remediation:
                   border:`1px solid ${ACT}`,borderRadius:5,cursor:(mitLoading||!allApplicable.length)?"default":"pointer",
                   color:mitLoading?ACT:"#000",fontSize:12,fontWeight:600
                 }}>
-                  {mitLoading?"⏳ Generating…":"🤖 Generate Remediation"}
+                  {mitLoading?"Generating...":"Generate Remediation"}
                 </button>
-                <button onClick={()=>window.print()} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${BDR}`,borderRadius:5,color:MUT,cursor:"pointer",fontSize:12}}>🖨 Print</button>
+                <button onClick={()=>window.print()} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${BDR}`,borderRadius:5,color:MUT,cursor:"pointer",fontSize:12}}>Print</button>
               </div>
             </div>
 
@@ -844,7 +850,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                 return <div key={t.id} style={{paddingBottom:14,marginBottom:14,borderBottom:`1px solid ${BDR}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:8,flexWrap:"wrap"}}>
                     <div>
-                      <span style={{color:t.nodeColor,fontSize:11,marginRight:8}}>⊙ {t.nodeLabel}</span>
+                      <span style={{color:t.nodeColor,fontSize:11,marginRight:8}}>@ {t.nodeLabel}</span>
                       <span style={{color:TXT,fontSize:13,fontWeight:500}}>{t.title}</span>
                     </div>
                     <div style={{display:"flex",gap:5,flexShrink:0}}>
@@ -852,7 +858,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                       <Tag label={sc?.id||""} color={sc?.color||"#fff"}/>
                     </div>
                   </div>
-                  <div style={{color:"#30d158",fontSize:13,marginBottom:6}}>▸ {mit.shortFix}</div>
+                  <div style={{color:"#30d158",fontSize:13,marginBottom:6}}>- {mit.shortFix}</div>
                   {mit.steps?.map((s,i)=><div key={i} style={{color:MUT,fontSize:12,paddingLeft:14,marginBottom:2}}>{i+1}. {s}</div>)}
                   {mit.control&&<div style={{color:"#2a3d5a",fontSize:11,marginTop:6}}>Control: <span style={{color:"#334155"}}>{mit.control}</span></div>}
                 </div>;
@@ -860,7 +866,7 @@ Return ONLY valid JSON — map from threat id to remediation:
             </div>}
 
             <div style={{textAlign:"center",color:"#182038",fontSize:10,fontFamily:"monospace",marginTop:16,paddingBottom:8}}>
-              ThreatModeler · STRIDE + DREAD · {appName} · {new Date().toLocaleDateString()}
+              ThreatModeler · {appName} · {new Date().toLocaleDateString()}
             </div>
           </div>
         </div>
