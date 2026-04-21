@@ -28,9 +28,9 @@ const STENCIL_MIME = "application/x-threatmodeler-stencil";
 const PALETTE_GROUPS = componentsByCategory();
 
 const C = {
-  shell: { display: "flex", height: "100%", minHeight: 0, background: "#050810", color: "#e2e8f0", fontFamily: "'DM Sans',sans-serif" },
+  shell: { display: "flex", flex: 1, height: "100%", minHeight: 0, background: "#050810", color: "#e2e8f0", fontFamily: "'DM Sans',sans-serif" },
   sidebar: { width: 240, flexShrink: 0, background: "#08101e", borderRight: "1px solid #1a2540", overflowY: "auto", padding: "12px 12px 24px" },
-  canvasWrap: { flex: 1, position: "relative", minWidth: 0, background: "#050810" },
+  canvasWrap: { flex: 1, position: "relative", minWidth: 0, minHeight: 0, background: "#050810" },
   inspector: { width: 360, flexShrink: 0, background: "#08101e", borderLeft: "1px solid #1a2540", overflowY: "auto", padding: "14px 14px 24px" },
   groupHdr: { color: "#475569", fontFamily: "monospace", fontSize: 10, letterSpacing: 1, margin: "12px 0 6px", textTransform: "uppercase" },
   stencil: { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, borderRadius: 6, border: "1px solid #1a2540", cursor: "grab", background: "#0d1421" },
@@ -289,10 +289,11 @@ function DesignerInner({ initialModules, onCommit, onCancel }) {
     event.preventDefault();
     const componentId = event.dataTransfer.getData(STENCIL_MIME);
     if (!componentId) return;
-    const bounds = wrapperRef.current?.getBoundingClientRect();
+    if (!reactFlowInstance || !wrapperRef.current) return;
+    const bounds = wrapperRef.current.getBoundingClientRect();
     const position = reactFlowInstance.screenToFlowPosition({
-      x: event.clientX - (bounds?.left || 0),
-      y: event.clientY - (bounds?.top || 0)
+      x: event.clientX - (bounds.left || 0),
+      y: event.clientY - (bounds.top || 0)
     });
     const node = nodeFromComponent(componentId, position);
     if (!node) return;
@@ -339,7 +340,7 @@ function DesignerInner({ initialModules, onCommit, onCancel }) {
             <button onClick={commit} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#00b4d8", color: "#000", fontWeight: 600, cursor: "pointer", fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}>Save & continue</button>
           </div>
         </div>
-        <div style={{ width: "100%", height: "100%" }} onDrop={onDrop} onDragOver={onDragOver}>
+        <div style={{ width: "100%", height: "100%", minHeight: 0 }} onDrop={onDrop} onDragOver={onDragOver}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
