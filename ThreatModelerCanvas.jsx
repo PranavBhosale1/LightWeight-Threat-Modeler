@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { DEFAULT_GEMINI_API_KEY } from "./geminiEnv.js";
+import { parseGeminiJson } from "./geminiJson.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const PALETTE = [
@@ -44,13 +45,13 @@ async function gemini(key, prompt) {
   const r = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`,
     { method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:.2,maxOutputTokens:4096}}) }
+      body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:.2,maxOutputTokens:8192,responseMimeType:"application/json"}}) }
   );
   const d = await r.json();
   if (!r.ok || d.error) throw new Error(d?.error?.message || `HTTP ${r.status}`);
   return d.candidates[0].content.parts[0].text;
 }
-const parseJ = (t) => JSON.parse(t.replace(/```json\n?/gi,"").replace(/```\n?/g,"").trim());
+const parseJ = (t) => parseGeminiJson(t);
 
 // ─── Node Shape ───────────────────────────────────────────────────────────────
 function NodeShape({ node, selected }) {

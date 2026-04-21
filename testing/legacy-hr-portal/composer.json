@@ -1,0 +1,14 @@
+{
+    "name": "corp/legacy-hr-portal",
+    "description": "Internal HR portal (legacy PHP monolith).",
+    "type": "project",
+    "require": {
+        "php": ">=5.6",
+        "phpmailer/phpmailer": "^5.2",
+        "ext-mysqli": "*",
+        "ext-gd": "*"
+    },
+    "autoload": {
+        "classmap": ["./"]
+    }
+}

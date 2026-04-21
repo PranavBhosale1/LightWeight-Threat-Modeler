@@ -1,4 +1,5 @@
 import { COMPONENT_LIBRARY, getComponent } from "./componentEngine.js";
+import { parseGeminiJson } from "./geminiJson.js";
 
 /**
  * Lightweight, deterministic classifier that maps a module to a library
@@ -179,7 +180,7 @@ ${JSON.stringify(summary, null, 2)}`);
 
   let parsed;
   try {
-    parsed = JSON.parse(text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim());
+    parsed = parseGeminiJson(text);
   } catch {
     return new Map();
   }

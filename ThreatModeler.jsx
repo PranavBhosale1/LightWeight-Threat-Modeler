@@ -5,6 +5,7 @@ import { extractProjectZipContext } from "./projectZipContext.js";
 import { extractStructuralModulesFromZip } from "./projectStructureModules.js";
 import { extractModulesFromCodeImports } from "./codeImportModules.js";
 import { DEFAULT_GEMINI_API_KEY } from "./geminiEnv.js";
+import { parseGeminiJson } from "./geminiJson.js";
 import { COMPONENT_LIBRARY, getComponent, listComponentOptions, injectFromLibrary, reseedLibraryThreats } from "./componentEngine.js";
 import { classifyModulesByRules, classifyModulesWithAi, unresolvedModules } from "./componentClassifier.js";
 import StencilDesigner from "./stencilDesigner.jsx";
@@ -271,10 +272,6 @@ function moduleHierarchyName(module, modules) {
   return names.join(" / ");
 }
 
-function parseJSON(text) {
-  return JSON.parse((text || "").replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim());
-}
-
 /** Text bundle for Gemini: author notes + optional ZIP-derived tree/snippets (truncated). */
 function profileContextForLlm(profile, maxChars = 120_000) {
   const parts = [];
@@ -517,7 +514,11 @@ async function gemini(apiKey, prompt) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 4096 }
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 8192,
+          responseMimeType: "application/json"
+        }
       })
     }
   );
@@ -529,7 +530,12 @@ async function gemini(apiKey, prompt) {
 
   const data = await response.json();
   if (data.error) throw new Error(data.error.message);
-  return data.candidates[0].content.parts[0].text;
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (text == null || text === "") {
+    const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason;
+    throw new Error(reason ? `No model text (${reason})` : "No model text in response");
+  }
+  return text;
 }
 
 function DFDNode({ node }) {
@@ -818,9 +824,9 @@ function Step1({ profile, setProfile, zipBufferRef, onOpenDesigner }) {
         <div style={{ ...C.card, borderColor: "#00b4d8" }}>
           <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}>STENCIL DESIGNER</div>
           <p style={{ color: "#475569", fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
-            Drag typed components onto the canvas (Login, Database, Payment Gateway, Queue …) and connect them. Each stencil instantly attaches its STRIDE threats and security requirements from the built-in library. Save returns to the wizard so you can continue with DFD, STRIDE, DREAD, and Report.
+            Fill in the application metadata below, then click <strong style={{ color: "#cbd5e1" }}>Continue</strong> to open the stencil designer. Drag typed components onto the canvas (Login, Database, Payment Gateway, Queue …) and connect them — each stencil instantly attaches its STRIDE threats and security requirements from the built-in library. Saving the diagram returns you to the wizard at Modules so you can continue with DFD, STRIDE, DREAD, and Report.
           </p>
-          <button type="button" onClick={onOpenDesigner} style={{ ...C.btn, ...C.btnP }}>Open stencil designer</button>
+          <button type="button" onClick={onOpenDesigner} style={{ ...C.btn, ...C.btnS }}>Open stencil designer now</button>
         </div>
       )}
 
@@ -1116,7 +1122,7 @@ Produce 5–14 modules. Names must be unique. Parent names must refer to another
       let usedFallback = false;
       try {
         const text = await gemini(apiKey, prompt);
-        const parsed = parseJSON(text);
+        const parsed = parseGeminiJson(text);
         const rows = Array.isArray(parsed) ? parsed : parsed.modules || parsed.items;
         next = modulesFromAiJson(rows);
       } catch (llmErr) {
@@ -1323,7 +1329,7 @@ Return:
   "summary": "2-3 sentence security posture summary"
 }`);
 
-      setDfd(parseJSON(text));
+      setDfd(parseGeminiJson(text));
     } catch (error) {
       setErr(error.message);
     } finally {
@@ -1582,7 +1588,7 @@ Return ONLY a valid JSON array (10-18 threats, all 6 STRIDE categories covered, 
   "attackVector":"Concrete attack technique"
 }]`);
 
-      const data = parseJSON(text);
+      const data = parseGeminiJson(text);
 
       setThreats((current) => {
         const preserved = current.filter((threat) => threat.source !== "gemini");
@@ -2060,7 +2066,7 @@ Threats: ${JSON.stringify(payload)}
 Return ONLY valid JSON (no markdown):
 {"T001":{"shortFix":"one-liner","recommendations":["step1","step2","step3"],"effort":"Low|Medium|High","securityControl":"OWASP/security control reference"}}`);
 
-      setMitigations(parseJSON(text));
+      setMitigations(parseGeminiJson(text));
     } catch (error) {
       setErr(error.message);
     } finally {
@@ -2429,6 +2435,16 @@ export default function ThreatModeler() {
     return true;
   };
 
+  const openDesignerFresh = () => {
+    setModules([createModule("m-1")]);
+    setThreats([]);
+    setDfd(null);
+    setTrustBoundaries([]);
+    setQuestionnaireAnswers({});
+    setMitigations({});
+    setWorkspace("designer");
+  };
+
   const steps = ["Profile", "Modules", "DFD", "STRIDE", "DREAD", "Report"];
 
   if (workspace === "canvas") {
@@ -2549,7 +2565,7 @@ export default function ThreatModeler() {
       </div>
 
       <main style={C.main} className="grid2 grid3">
-        {step === 1 && <Step1 profile={profile} setProfile={setProfile} zipBufferRef={zipBufferRef} onOpenDesigner={() => setWorkspace("designer")} />}
+        {step === 1 && <Step1 profile={profile} setProfile={setProfile} zipBufferRef={zipBufferRef} onOpenDesigner={openDesignerFresh} />}
         {step === 2 && <Step2 modules={modules} setModules={setModules} apiKey={apiKey} profile={profile} setProfile={setProfile} zipBufferRef={zipBufferRef} />}
         {step === 3 && (
           <Step3
@@ -2574,7 +2590,20 @@ export default function ThreatModeler() {
         <button style={{ ...C.btn, ...C.btnS }} onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1}>Back</button>
         <span style={{ color: "#1e2d4a", fontSize: 12, fontFamily: "monospace" }}>Step {step} / {steps.length}</span>
         {step < steps.length
-          ? <button style={{ ...C.btn, ...C.btnP, opacity: canNext() ? 1 : 0.4 }} onClick={() => canNext() && setStep((current) => current + 1)} disabled={!canNext()}>Continue</button>
+          ? <button
+              style={{ ...C.btn, ...C.btnP, opacity: canNext() ? 1 : 0.4 }}
+              onClick={() => {
+                if (!canNext()) return;
+                if (step === 1 && profile.appStatus === "new") {
+                  openDesignerFresh();
+                  return;
+                }
+                setStep((current) => current + 1);
+              }}
+              disabled={!canNext()}
+            >
+              {step === 1 && profile.appStatus === "new" ? "Continue to stencil designer" : "Continue"}
+            </button>
           : <button style={{ ...C.btn, ...C.btnP }} onClick={() => window.print()}>Print / Save PDF</button>}
       </footer>
     </div>
