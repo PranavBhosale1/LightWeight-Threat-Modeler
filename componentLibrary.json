@@ -396,6 +396,311 @@
         { "id": "client.web.req.cookies", "title": "Secure cookie flags", "description": "HttpOnly, Secure, SameSite=Lax/Strict on all auth cookies.", "controlFamily": "OWASP ASVS 3.4" },
         { "id": "client.web.req.serverAuthz", "title": "All authorization on server", "description": "Treat the client as untrusted — never enforce permissions in the browser only.", "controlFamily": "OWASP ASVS 4.1.1" }
       ]
+    },
+    {
+      "id": "edge.cdn",
+      "label": "CDN / WAF edge",
+      "category": "Edge",
+      "icon": "cloud",
+      "color": "#22d3ee",
+      "kind": "externalEntity",
+      "defaultInputs": "HTTPS requests",
+      "defaultOutputs": "cached responses, origin forwards",
+      "defaultDataStores": "edge cache config",
+      "defaultExternalEntities": "End users, origin",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": ["cloudflare", "fastly", "akamai", "@aws-sdk/client-cloudfront"],
+        "fileRegex": ["cloudflare", "cdn", "edge"],
+        "envKeys": ["CLOUDFLARE_", "FASTLY_", "CDN_"],
+        "nameKeywords": ["cdn", "edge", "waf", "cloudfront"]
+      },
+      "threats": [
+        { "id": "edge.cdn.spoof", "stride": "S", "title": "DNS hijack or stale DNS to fake edge", "attackVector": "Compromised registrar or DNS lets traffic bypass the real CDN/WAF and hit a malicious origin.", "defaultSeverity": "High" },
+        { "id": "edge.cdn.tamper", "stride": "T", "title": "Cache poisoning at edge", "attackVector": "Manipulated Vary/Cache-Key or unkeyed inputs cause one user's response to be served to others.", "defaultSeverity": "High" },
+        { "id": "edge.cdn.info", "stride": "I", "title": "Sensitive data cached publicly", "attackVector": "Cache-Control mis-set on authenticated or tenant-specific JSON; edge caches PII for all visitors.", "defaultSeverity": "High" },
+        { "id": "edge.cdn.dos", "stride": "D", "title": "Origin bypass / cache busting flood", "attackVector": "Attacker crafts requests that always miss cache, overwhelming origin while CDN appears healthy.", "defaultSeverity": "High" },
+        { "id": "edge.cdn.eop", "stride": "E", "title": "Misconfigured WAF bypass", "attackVector": "Overly permissive WAF rules or IP allow-lists let SQLi/XSS reach origin.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "edge.cdn.req.tls", "title": "TLS 1.2+ and HSTS at edge", "description": "Enforce HTTPS, HSTS with preload where appropriate; redirect HTTP to HTTPS.", "controlFamily": "OWASP ASVS 9.1" },
+        { "id": "edge.cdn.req.cacheAuth", "title": "Never cache authenticated responses by default", "description": "Cache-Control: private/no-store for API and tenant-specific JSON unless explicitly designed for shared cache.", "controlFamily": "OWASP ASVS 8.2" },
+        { "id": "edge.cdn.req.waf", "title": "Managed WAF + bot rules", "description": "OWASP CRS or vendor rules; rate limits and geo blocks as needed.", "controlFamily": "OWASP ASVS 11.1.4" },
+        { "id": "edge.cdn.req.originShield", "title": "Origin shield / single egress", "description": "Collapse origin connections through shield POP to absorb cache busting.", "controlFamily": "Availability" }
+      ]
+    },
+    {
+      "id": "edge.originProxy",
+      "label": "Reverse proxy (nginx / origin)",
+      "category": "Edge",
+      "icon": "layers",
+      "color": "#22d3ee",
+      "kind": "process",
+      "defaultInputs": "HTTP from CDN, static file requests",
+      "defaultOutputs": "proxied API, SPA static assets",
+      "defaultDataStores": "",
+      "defaultExternalEntities": "CDN, API service, browser",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": [],
+        "fileRegex": ["nginx\\.conf", "default\\.conf"],
+        "envKeys": ["NGINX_"],
+        "nameKeywords": ["nginx", "reverse proxy", "ingress"]
+      },
+      "threats": [
+        { "id": "edge.proxy.tamper", "stride": "T", "title": "Header injection / request smuggling", "attackVector": "Conflicting Content-Length and Transfer-Encoding between proxy and upstream desyncs or smuggles requests.", "defaultSeverity": "High" },
+        { "id": "edge.proxy.info", "stride": "I", "title": "Internal headers leaked to client", "attackVector": "X-Forwarded-* or internal hostnames reflected in error pages.", "defaultSeverity": "Medium" },
+        { "id": "edge.proxy.dos", "stride": "D", "title": "Slowloris / connection exhaustion", "attackVector": "Many slow connections tie up worker connections to upstream.", "defaultSeverity": "Medium" },
+        { "id": "edge.proxy.eop", "stride": "E", "title": "Misrouted admin or debug routes", "attackVector": "/debug or /metrics exposed on same listener as public SPA.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "edge.proxy.req.http2", "title": "Harden HTTP/2 and request limits", "description": "Body size caps, timeouts, disable unsafe HTTP/1.1 downgrade paths per vendor guidance.", "controlFamily": "OWASP ASVS 5.1" },
+        { "id": "edge.proxy.req.headers", "title": "Strip and set trusted forwarded headers", "description": "Overwrite X-Forwarded-For at edge; do not trust client-supplied internal IPs.", "controlFamily": "OWASP ASVS 4.1" },
+        { "id": "edge.proxy.req.split", "title": "Separate listeners for admin/metrics", "description": "Bind metrics and admin to localhost or private network only.", "controlFamily": "OWASP ASVS 4.1" }
+      ]
+    },
+    {
+      "id": "security.rateLimiter",
+      "label": "Rate limiting & throttling",
+      "category": "Security",
+      "icon": "gauge",
+      "color": "#f97316",
+      "kind": "process",
+      "defaultInputs": "request keys (IP, tenant, user, route)",
+      "defaultOutputs": "allow / deny / 429",
+      "defaultDataStores": "Redis counters",
+      "defaultExternalEntities": "API gateway, app",
+      "dataSensitivity": "low",
+      "detectionHints": {
+        "depNames": ["express-rate-limit", "rate-limiter-flexible", "ioredis"],
+        "fileRegex": ["rate[-_]?limit", "throttle"],
+        "envKeys": ["RATE_LIMIT_"],
+        "nameKeywords": ["rate", "limit", "throttle", "429"]
+      },
+      "threats": [
+        { "id": "rl.spoof", "stride": "S", "title": "Spoofed client identity evades limits", "attackVector": "Rotating X-Forwarded-For or IPv6 ranges bypass per-IP limits if edge headers are trusted blindly.", "defaultSeverity": "High" },
+        { "id": "rl.tamper", "stride": "T", "title": "Counter manipulation in shared store", "attackVector": "Race or Lua script bug lets attacker reset or inflate another tenant's counters.", "defaultSeverity": "Medium" },
+        { "id": "rl.dos", "stride": "D", "title": "Redis or store outage denies all traffic", "attackVector": "Fail-open on limiter lets abuse through; fail-closed becomes self-DoS.", "defaultSeverity": "High" },
+        { "id": "rl.info", "stride": "I", "title": "429 responses leak tenant load patterns", "attackVector": "Different limits per tier reveal which tenant class a key belongs to.", "defaultSeverity": "Low" }
+      ],
+      "securityRequirements": [
+        { "id": "rl.req.keys", "title": "Hierarchical limit keys", "description": "Combine tenant id + user id + route; never rely on IP alone for authenticated APIs.", "controlFamily": "OWASP ASVS 11.1.4" },
+        { "id": "rl.req.edge", "title": "Enforce at edge when possible", "description": "Drop abusive traffic before it hits app workers and DB.", "controlFamily": "OWASP ASVS 11.1.4" },
+        { "id": "rl.req.fail", "title": "Defined fail-open vs fail-closed", "description": "Document behavior when Redis is down; prefer bounded fail-closed for auth endpoints.", "controlFamily": "Resilience" }
+      ]
+    },
+    {
+      "id": "auth.tokenService",
+      "label": "JWT & refresh token service",
+      "category": "Authentication",
+      "icon": "key-round",
+      "color": "#4ade80",
+      "kind": "process",
+      "defaultInputs": "login, refresh, logout, revoke",
+      "defaultOutputs": "access JWT, rotated refresh token, revocation events",
+      "defaultDataStores": "refresh token metadata (Redis/DB)",
+      "defaultExternalEntities": "Clients, API",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["jose", "jsonwebtoken", "oauth2", "openid-client"],
+        "fileRegex": ["refresh[-_]?token", "jwt", "jti"],
+        "envKeys": ["JWT_", "REFRESH_", "OIDC_"],
+        "nameKeywords": ["jwt", "refresh", "token", "jti", "rotation"]
+      },
+      "threats": [
+        { "id": "tok.spoof", "stride": "S", "title": "Refresh token theft (XSS, malware)", "attackVector": "Long-lived refresh token stolen from storage or logs allows full account takeover until rotation.", "defaultSeverity": "Critical" },
+        { "id": "tok.tamper", "stride": "T", "title": "Refresh token replay after rotation", "attackVector": "Server accepts an old refresh token family after rotation (reuse detection missing).", "defaultSeverity": "High" },
+        { "id": "tok.info", "stride": "I", "title": "JWT claims leak PII or tenant ids", "attackVector": "Verbose claims in access tokens cached by intermediaries or logged.", "defaultSeverity": "Medium" },
+        { "id": "tok.dos", "stride": "D", "title": "Revocation list / Redis hot key", "attackVector": "Global jti lookup becomes bottleneck; attackers trigger mass revocations.", "defaultSeverity": "Medium" },
+        { "id": "tok.eop", "stride": "E", "title": "Privilege claims trusted from client", "attackVector": "role or tenant_id in JWT not re-verified server-side on each sensitive call.", "defaultSeverity": "Critical" }
+      ],
+      "securityRequirements": [
+        { "id": "tok.req.rotation", "title": "Refresh token rotation + reuse detection", "description": "On reuse of an invalidated refresh token, revoke entire token family.", "controlFamily": "OAuth 2.1 / OWASP ASVS 3.2" },
+        { "id": "tok.req.accessTtl", "title": "Short access token TTL", "description": "Access JWTs minutes-long; sensitive actions may require step-up.", "controlFamily": "OWASP ASVS 3.1" },
+        { "id": "tok.req.binding", "title": "Bind refresh to client where possible", "description": "DPoP, mTLS, or rotating device id for high-risk tenants.", "controlFamily": "OAuth 2.0 DPoP" },
+        { "id": "tok.req.revoke", "title": "Server-side revocation on logout/password change", "description": "Invalidate refresh row and publish jti blocklist with bounded TTL.", "controlFamily": "OWASP ASVS 3.3" }
+      ]
+    },
+    {
+      "id": "integration.webhookOutbound",
+      "label": "Outbound webhooks (tenant callbacks)",
+      "category": "Integrations",
+      "icon": "webhook",
+      "color": "#ec4899",
+      "kind": "process",
+      "defaultInputs": "event payloads, tenant webhook URL",
+      "defaultOutputs": "signed HTTPS POSTs, delivery status",
+      "defaultDataStores": "delivery log, dead-letter queue",
+      "defaultExternalEntities": "Tenant-configured HTTPS endpoints",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": [],
+        "fileRegex": ["webhook", "outbound", "notify"],
+        "envKeys": ["WEBHOOK_", "HMAC_"],
+        "nameKeywords": ["webhook", "callback", "outbound"]
+      },
+      "threats": [
+        { "id": "wh.ssrf", "stride": "T", "title": "SSRF via tenant URL", "attackVector": "Tenant registers http://169.254.169.254/ or internal metadata URL; worker fetches it.", "defaultSeverity": "Critical" },
+        { "id": "wh.spoof", "stride": "S", "title": "Webhook signature bypass", "attackVector": "Receiver skips HMAC verify or compares timing-unsafe; attacker forges events.", "defaultSeverity": "High" },
+        { "id": "wh.repud", "stride": "R", "title": "No idempotent delivery id", "attackVector": "Receivers cannot dedupe replays; duplicate charges or state corruption.", "defaultSeverity": "Medium" },
+        { "id": "wh.info", "stride": "I", "title": "PII in webhook bodies logged", "attackVector": "Full payload logged to ELK with note content or tokens.", "defaultSeverity": "High" },
+        { "id": "wh.dos", "stride": "D", "title": "Slow tenant endpoint stalls workers", "attackVector": "No per-tenant concurrency cap; one bad URL blocks all deliveries.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "wh.req.allowlist", "title": "URL validation and SSRF allow-list", "description": "HTTPS only, public IP ranges only, block RFC1918 and metadata; optional domain allow-list per tenant.", "controlFamily": "OWASP ASVS 12.6" },
+        { "id": "wh.req.hmac", "title": "HMAC-SHA256 with timestamp + idempotency", "description": "Sign body + timestamp; reject stale; include event id for dedupe.", "controlFamily": "OWASP ASVS 6.5" },
+        { "id": "wh.req.isolate", "title": "Bulkhead workers per tenant", "description": "Separate queues and timeouts so one tenant cannot starve others.", "controlFamily": "OWASP ASVS 11.1.6" }
+      ]
+    },
+    {
+      "id": "integration.emailService",
+      "label": "Transactional email (SMTP)",
+      "category": "Integrations",
+      "icon": "mail",
+      "color": "#ec4899",
+      "kind": "externalEntity",
+      "defaultInputs": "send requests (invite, verify, alert)",
+      "defaultOutputs": "delivered mail, bounces",
+      "defaultDataStores": "send log",
+      "defaultExternalEntities": "SendGrid / SES / Postmark",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["nodemailer", "@sendgrid/mail", "resend", "@aws-sdk/client-ses"],
+        "fileRegex": ["(^|/)mail/", "email\\.service"],
+        "envKeys": ["SMTP_", "SES_", "SENDGRID_"],
+        "nameKeywords": ["smtp", "email", "ses", "sendgrid"]
+      },
+      "threats": [
+        { "id": "mail.spoof", "stride": "S", "title": "Forged From / reply-to phishing", "attackVector": "Misconfigured SPF/DKIM lets attackers spoof your domain in parallel.", "defaultSeverity": "High" },
+        { "id": "mail.tamper", "stride": "T", "title": "Header injection via display name", "attackVector": "Unsanitized name field injects CRLF and Bcc to exfiltrate reset links.", "defaultSeverity": "High" },
+        { "id": "mail.info", "stride": "I", "title": "Reset / magic links in clear logs", "attackVector": "Provider webhooks or app logs store full URLs with secrets.", "defaultSeverity": "High" },
+        { "id": "mail.dos", "stride": "D", "title": "Email bombing / quota exhaustion", "attackVector": "Unthrottled send endpoint spams users or burns provider quota.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "mail.req.sanitize", "title": "Encode headers and ban CRLF in fields", "description": "Strict validation on to/from/subject; no raw user strings in headers without encoding.", "controlFamily": "OWASP ASVS 5.1" },
+        { "id": "mail.req.spf", "title": "SPF, DKIM, DMARC aligned", "description": "Publish DNS records; monitor DMARC reports.", "controlFamily": "Email auth" },
+        { "id": "mail.req.rate", "title": "Per-user and global send limits", "description": "Throttle invites and notifications to prevent abuse.", "controlFamily": "OWASP ASVS 11.1.4" }
+      ]
+    },
+    {
+      "id": "feature.publicShareLink",
+      "label": "Public share links",
+      "category": "Feature",
+      "icon": "link",
+      "color": "#a78bfa",
+      "kind": "process",
+      "defaultInputs": "resource id, expiry, permission",
+      "defaultOutputs": "unguessable URL token, redirect to content",
+      "defaultDataStores": "share token hash, Redis cache",
+      "defaultExternalEntities": "Anonymous browsers",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": [],
+        "fileRegex": ["share", "public[-_]?link", "magic[-_]?link"],
+        "envKeys": ["SHARE_"],
+        "nameKeywords": ["share", "public", "unlisted", "magic"]
+      },
+      "threats": [
+        { "id": "share.guess", "stride": "I", "title": "Token enumeration / short tokens", "attackVector": "Predictable or short share ids allow crawling of all shared notes.", "defaultSeverity": "Critical" },
+        { "id": "share.tamper", "stride": "T", "title": "IDOR on share resource", "attackVector": "Changing note id in share URL accesses another tenant's note if authz check missing.", "defaultSeverity": "Critical" },
+        { "id": "share.info", "stride": "I", "title": "Cache serves share to wrong user", "attackVector": "CDN or Redis caches HTML/JSON without Vary on auth or tenant.", "defaultSeverity": "High" },
+        { "id": "share.dos", "stride": "D", "title": "Share link scraping / hotlink abuse", "attackVector": "Open graph crawlers hammer origin; no rate limit on public route.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "share.req.entropy", "title": "128+ bit random tokens", "description": "Use crypto-secure tokens; store only hash server-side.", "controlFamily": "OWASP ASVS 2.5" },
+        { "id": "share.req.authz", "title": "Re-verify tenant + object on every fetch", "description": "Never trust URL alone; check note belongs to tenant and share is active.", "controlFamily": "OWASP ASVS 4.2.1" },
+        { "id": "share.req.cache", "title": "Private cache for shared resources", "description": "Cache-Control: private or no-store for tenant-specific share views.", "controlFamily": "OWASP ASVS 8.2" }
+      ]
+    },
+    {
+      "id": "security.tenantIsolation",
+      "label": "Multi-tenant isolation",
+      "category": "Security",
+      "icon": "shield",
+      "color": "#f97316",
+      "kind": "process",
+      "defaultInputs": "all DB/API requests with tenant context",
+      "defaultOutputs": "scoped queries, denied cross-tenant access",
+      "defaultDataStores": "Postgres RLS policies, tenant id column",
+      "defaultExternalEntities": "All app tiers",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": [],
+        "fileRegex": ["tenant", "rls", "row[-_]?level"],
+        "envKeys": ["TENANT_"],
+        "nameKeywords": ["tenant", "multitenancy", "rls"]
+      },
+      "threats": [
+        { "id": "mt.idor", "stride": "I", "title": "Cross-tenant data leak (IDOR)", "attackVector": "Missing tenant filter in query returns another customer's rows when id is guessed.", "defaultSeverity": "Critical" },
+        { "id": "mt.tamper", "stride": "T", "title": "Tenant id override in request", "attackVector": "Client sends X-Tenant-Id header that server trusts over JWT tenant.", "defaultSeverity": "Critical" },
+        { "id": "mt.eop", "stride": "E", "title": "Worker crosses tenant context", "attackVector": "Async job processes job for tenant A with DB session still bound to tenant B.", "defaultSeverity": "Critical" },
+        { "id": "mt.info", "stride": "I", "title": "Logs mix tenant data", "attackVector": "Structured logs missing tenant_id; support tools expose wrong customer.", "defaultSeverity": "High" }
+      ],
+      "securityRequirements": [
+        { "id": "mt.req.rls", "title": "Enforce RLS or equivalent in DB", "description": "Postgres RLS with session variable or app user per tenant; defense in depth with query filters.", "controlFamily": "OWASP ASVS 4.2" },
+        { "id": "mt.req.jwt", "title": "Tenant from signed token only", "description": "Derive tenant_id from verified JWT/session; never from client header alone.", "controlFamily": "OWASP ASVS 4.1" },
+        { "id": "mt.req.test", "title": "Automated cross-tenant tests", "description": "Contract tests that A cannot read B's ids across API and workers.", "controlFamily": "Testing" }
+      ]
+    },
+    {
+      "id": "api.presignedUrl",
+      "label": "Presigned URL API (S3 uploads)",
+      "category": "API",
+      "icon": "upload-cloud",
+      "color": "#00b4d8",
+      "kind": "process",
+      "defaultInputs": "file metadata, content-type, tenant, object key",
+      "defaultOutputs": "presigned PUT/GET URLs, scoped policy",
+      "defaultDataStores": "object metadata",
+      "defaultExternalEntities": "Browser, object storage",
+      "dataSensitivity": "high",
+      "detectionHints": {
+        "depNames": ["@aws-sdk/s3-request-presigner", "@aws-sdk/client-s3"],
+        "fileRegex": ["presign", "signed[-_]?url", "upload[-_]?url"],
+        "envKeys": ["S3_", "PRESIGN_"],
+        "nameKeywords": ["presign", "signed", "upload"]
+      },
+      "threats": [
+        { "id": "ps.scope", "stride": "T", "title": "Over-broad presigned PUT", "attackVector": "Policy allows any key prefix or content-type; attacker uploads malware or overwrites others' objects.", "defaultSeverity": "High" },
+        { "id": "ps.info", "stride": "I", "title": "Long TTL GET URLs leaked", "attackVector": "GET presigned URL shared in referrer or logs exposes object for hours.", "defaultSeverity": "High" },
+        { "id": "ps.spoof", "stride": "S", "title": "Wrong bucket / account in signer", "attackVector": "Misconfigured role signs into unintended bucket.", "defaultSeverity": "High" },
+        { "id": "ps.dos", "stride": "D", "title": "Unbounded presign requests", "attackVector": "Attacker mints unlimited PUT URLs and fills storage.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "ps.req.ttl", "title": "Short TTL and exact object key", "description": "Server generates key with tenant prefix; TTL <= 15 minutes; single verb.", "controlFamily": "OWASP ASVS 4.1.4" },
+        { "id": "ps.req.content", "title": "Content-Type and size constraints", "description": "Bind signature to expected type and max bytes; virus-scan on completion callback.", "controlFamily": "OWASP ASVS 12.1" },
+        { "id": "ps.req.rate", "title": "Per-tenant presign rate limits", "description": "Prevent storage cost abuse.", "controlFamily": "OWASP ASVS 11.1.4" }
+      ]
+    },
+    {
+      "id": "async.backgroundWorker",
+      "label": "Background worker / cron",
+      "category": "Async",
+      "icon": "clock",
+      "color": "#ff9f0a",
+      "kind": "process",
+      "defaultInputs": "scheduled jobs, queue messages",
+      "defaultOutputs": "DB writes, webhooks, emails",
+      "defaultDataStores": "job queue, Postgres",
+      "defaultExternalEntities": "Internal services",
+      "dataSensitivity": "medium",
+      "detectionHints": {
+        "depNames": ["bullmq", "node-cron", "agenda", "sidekiq"],
+        "fileRegex": ["(^|/)workers?/", "cron", "scheduler"],
+        "envKeys": ["WORKER_", "CRON_"],
+        "nameKeywords": ["worker", "cron", "job", "schedule"]
+      },
+      "threats": [
+        { "id": "bw.ctx", "stride": "E", "title": "Stale tenant / user context in job", "attackVector": "Global DB connection not reset between jobs causes cross-tenant writes.", "defaultSeverity": "Critical" },
+        { "id": "bw.inject", "stride": "T", "title": "Poison job payload", "attackVector": "Attacker enqueues job via bug in producer with SQL in payload.", "defaultSeverity": "High" },
+        { "id": "bw.info", "stride": "I", "title": "PII in job logs", "attackVector": "Full note body logged on processing failure.", "defaultSeverity": "Medium" },
+        { "id": "bw.dos", "stride": "D", "title": "Job backlog exhausts workers", "attackVector": "No max concurrency or DLQ; one tenant floods queue.", "defaultSeverity": "Medium" }
+      ],
+      "securityRequirements": [
+        { "id": "bw.req.context", "title": "Explicit tenant context per job", "description": "Pass tenant_id in payload; set session variable at job start; verify before writes.", "controlFamily": "OWASP ASVS 4.2" },
+        { "id": "bw.req.schema", "title": "Validate job payloads", "description": "Schema-versioned messages; reject unknown fields.", "controlFamily": "OWASP ASVS 5.1" },
+        { "id": "bw.req.limiter", "title": "Per-tenant concurrency caps", "description": "Fair scheduling so one tenant cannot starve workers.", "controlFamily": "OWASP ASVS 11.1.6" }
+      ]
     }
   ]
 }
