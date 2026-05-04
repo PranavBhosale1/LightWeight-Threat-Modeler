@@ -28,19 +28,19 @@ const STENCIL_MIME = "application/x-threatmodeler-stencil";
 const PALETTE_GROUPS = componentsByCategory();
 
 const C = {
-  shell: { display: "flex", flex: 1, height: "100%", minHeight: 0, background: "#050810", color: "#e2e8f0", fontFamily: "'DM Sans',sans-serif" },
-  sidebar: { width: 240, flexShrink: 0, background: "#08101e", borderRight: "1px solid #1a2540", overflowY: "auto", padding: "12px 12px 24px" },
-  canvasWrap: { flex: 1, position: "relative", minWidth: 0, minHeight: 0, background: "#050810" },
-  inspector: { width: 360, flexShrink: 0, background: "#08101e", borderLeft: "1px solid #1a2540", overflowY: "auto", padding: "14px 14px 24px" },
-  groupHdr: { color: "#475569", fontFamily: "monospace", fontSize: 10, letterSpacing: 1, margin: "12px 0 6px", textTransform: "uppercase" },
-  stencil: { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, borderRadius: 6, border: "1px solid #1a2540", cursor: "grab", background: "#0d1421" },
-  card: { background: "#0d1421", border: "1px solid #1a2540", borderRadius: 8, padding: 12, marginBottom: 12 },
+  shell: { display: "flex", flex: 1, height: "100%", minHeight: 0, background: "#f8f9fa", color: "#2b3437", fontFamily: "'Inter',sans-serif" },
+  sidebar: { width: 240, flexShrink: 0, background: "#f1f4f6", borderRight: "1px solid rgba(171, 179, 183, 0.22)", overflowY: "auto", padding: "12px 12px 24px" },
+  canvasWrap: { flex: 1, position: "relative", minWidth: 0, minHeight: 0, background: "#f8f9fa" },
+  inspector: { width: 360, flexShrink: 0, background: "#f1f4f6", borderLeft: "1px solid rgba(171, 179, 183, 0.22)", overflowY: "auto", padding: "14px 14px 24px" },
+  groupHdr: { color: "#586064", fontFamily: "monospace", fontSize: 10, letterSpacing: 1, margin: "12px 0 6px", textTransform: "uppercase" },
+  stencil: { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 6, borderRadius: 6, border: "1px solid rgba(171, 179, 183, 0.22)", cursor: "grab", background: "#ffffff" },
+  card: { background: "#ffffff", border: "1px solid rgba(171, 179, 183, 0.22)", borderRadius: 8, padding: 12, marginBottom: 12 },
   pill: (color) => ({ display: "inline-block", padding: "1px 6px", borderRadius: 3, fontSize: 10, fontFamily: "monospace", color, border: `1px solid ${color}66`, background: `${color}14`, marginRight: 4, marginBottom: 4 }),
-  inp: { width: "100%", background: "#080e1a", border: "1px solid #1a2540", borderRadius: 5, padding: "6px 8px", color: "#e2e8f0", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "'DM Sans',sans-serif" }
+  inp: { width: "100%", background: "#f1f4f6", border: "1px solid rgba(171, 179, 183, 0.22)", borderRadius: 5, padding: "6px 8px", color: "#2b3437", fontSize: 12, outline: "none", boxSizing: "border-box", fontFamily: "'Inter',sans-serif" }
 };
 
 function StencilNode({ data, selected }) {
-  const color = data.color || "#00b4d8";
+  const color = data.color || "#436086";
   return (
     <div
       style={{
@@ -50,12 +50,12 @@ function StencilNode({ data, selected }) {
         padding: "8px 14px",
         minWidth: 140,
         textAlign: "center",
-        fontFamily: "'DM Sans',sans-serif"
+        fontFamily: "'Inter',sans-serif"
       }}
     >
       <Handle type="target" position={Position.Left} style={{ background: color, width: 8, height: 8 }} />
       <div style={{ color, fontSize: 9, fontFamily: "monospace", letterSpacing: 1, textTransform: "uppercase" }}>{data.category || "Component"}</div>
-      <div style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600, marginTop: 2 }}>{data.label}</div>
+      <div style={{ color: "#2b3437", fontSize: 13, fontWeight: 600, marginTop: 2 }}>{data.label}</div>
       <Handle type="source" position={Position.Right} style={{ background: color, width: 8, height: 8 }} />
     </div>
   );
@@ -66,6 +66,30 @@ const NODE_TYPES = { stencil: StencilNode };
 let nodeCounter = 0;
 const nextNodeId = () => `node-${Date.now()}-${++nodeCounter}`;
 
+const HR_PORTAL_DEMO_COMPONENTS = [
+  { key: "client", componentId: "client.webApp", position: { x: 80, y: 180 } },
+  { key: "edge", componentId: "edge.originProxy", position: { x: 320, y: 180 } },
+  { key: "app", componentId: "api.publicEndpoint", position: { x: 590, y: 180 } },
+  { key: "db", componentId: "data.database", position: { x: 900, y: 80 } },
+  { key: "uploads", componentId: "storage.objectStore", position: { x: 900, y: 250 } },
+  { key: "smtp", componentId: "integration.emailService", position: { x: 900, y: 420 } },
+  { key: "login", componentId: "auth.login", position: { x: 590, y: 20 } },
+  { key: "cron", componentId: "async.backgroundWorker", position: { x: 590, y: 420 } }
+];
+
+const HR_PORTAL_DEMO_FLOWS = [
+  ["client", "edge"],
+  ["edge", "app"],
+  ["client", "login"],
+  ["login", "app"],
+  ["app", "db"],
+  ["app", "uploads"],
+  ["app", "smtp"],
+  ["cron", "db"],
+  ["cron", "uploads"],
+  ["cron", "smtp"]
+];
+
 function PaletteSidebar() {
   const onDragStart = (event, componentId) => {
     event.dataTransfer.setData(STENCIL_MIME, componentId);
@@ -74,8 +98,8 @@ function PaletteSidebar() {
 
   return (
     <div style={C.sidebar}>
-      <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 11, letterSpacing: 1.5, marginBottom: 6 }}>STENCIL PALETTE</div>
-      <p style={{ color: "#475569", fontSize: 11, lineHeight: 1.5, marginBottom: 4 }}>Drag a component onto the canvas. Threats and security requirements attach automatically.</p>
+      <div style={{ color: "#436086", fontFamily: "monospace", fontSize: 11, letterSpacing: 1.5, marginBottom: 6 }}>STENCIL PALETTE</div>
+      <p style={{ color: "#586064", fontSize: 11, lineHeight: 1.5, marginBottom: 4 }}>Drag a component onto the canvas. Threats and security requirements attach automatically.</p>
       {PALETTE_GROUPS.map((group) => (
         <div key={group.category}>
           <div style={C.groupHdr}>{group.category}</div>
@@ -84,13 +108,13 @@ function PaletteSidebar() {
               key={c.id}
               draggable
               onDragStart={(event) => onDragStart(event, c.id)}
-              style={{ ...C.stencil, borderLeft: `3px solid ${c.color || "#00b4d8"}` }}
+              style={{ ...C.stencil, borderLeft: `3px solid ${c.color || "#436086"}` }}
               title={`${c.threats?.length || 0} threats · ${c.securityRequirements?.length || 0} requirements`}
             >
-              <div style={{ width: 8, height: 8, borderRadius: 4, background: c.color || "#00b4d8" }} />
+              <div style={{ width: 8, height: 8, borderRadius: 4, background: c.color || "#436086" }} />
               <div style={{ flex: 1 }}>
-                <div style={{ color: "#e2e8f0", fontSize: 12 }}>{c.label}</div>
-                <div style={{ color: "#475569", fontSize: 10, fontFamily: "monospace" }}>{c.threats?.length || 0}t · {c.securityRequirements?.length || 0}r</div>
+                <div style={{ color: "#2b3437", fontSize: 12 }}>{c.label}</div>
+                <div style={{ color: "#586064", fontSize: 10, fontFamily: "monospace" }}>{c.threats?.length || 0}t · {c.securityRequirements?.length || 0}r</div>
               </div>
             </div>
           ))}
@@ -104,11 +128,11 @@ function Inspector({ node, onUpdate, onDelete }) {
   if (!node) {
     return (
       <div style={C.inspector}>
-        <div style={{ color: "#00b4d8", fontFamily: "monospace", fontSize: 11, letterSpacing: 1.5, marginBottom: 8 }}>INSPECTOR</div>
-        <p style={{ color: "#475569", fontSize: 12, lineHeight: 1.5 }}>
+        <div style={{ color: "#436086", fontFamily: "monospace", fontSize: 11, letterSpacing: 1.5, marginBottom: 8 }}>INSPECTOR</div>
+        <p style={{ color: "#586064", fontSize: 12, lineHeight: 1.5 }}>
           Select a component on the canvas to view its STRIDE threats and security requirements drawn from the library.
         </p>
-        <div style={{ marginTop: 14, color: "#334155", fontSize: 11, fontFamily: "monospace" }}>
+        <div style={{ marginTop: 14, color: "#737c7f", fontSize: 11, fontFamily: "monospace" }}>
           {COMPONENT_LIBRARY.components.length} typed components in library.
         </div>
       </div>
@@ -138,28 +162,28 @@ function Inspector({ node, onUpdate, onDelete }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 6 }}>
         <div>
           <div style={{ color: component.color, fontFamily: "monospace", fontSize: 10, letterSpacing: 1, textTransform: "uppercase" }}>{component.category}</div>
-          <div style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 700 }}>{data.label || component.label}</div>
+          <div style={{ color: "#2b3437", fontSize: 16, fontWeight: 700 }}>{data.label || component.label}</div>
         </div>
         <button onClick={() => onDelete(node.id)} style={{ background: "transparent", border: "1px solid #ef4444", color: "#ef4444", padding: "4px 8px", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>Delete</button>
       </div>
 
       <div style={C.card}>
-        <div style={{ color: "#94a3b8", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>NAME</div>
+        <div style={{ color: "#586064", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>NAME</div>
         <input style={C.inp} value={data.label || ""} onChange={(event) => updateField("label", event.target.value)} />
-        <div style={{ color: "#94a3b8", fontFamily: "monospace", fontSize: 10, marginBottom: 6, marginTop: 10 }}>NOTES</div>
+        <div style={{ color: "#586064", fontFamily: "monospace", fontSize: 10, marginBottom: 6, marginTop: 10 }}>NOTES</div>
         <textarea style={{ ...C.inp, height: 56, resize: "vertical" }} value={data.notes || ""} onChange={(event) => updateField("notes", event.target.value)} placeholder="Architecture / context notes for this node..." />
       </div>
 
       <div style={C.card}>
         <div style={{ color: "#ec4899", fontFamily: "monospace", fontSize: 10, marginBottom: 6 }}>STRIDE THREATS ({component.threats?.length || 0})</div>
         {(component.threats || []).map((t) => (
-          <div key={t.id} style={{ borderTop: "1px solid #141e30", padding: "8px 0" }}>
+          <div key={t.id} style={{ borderTop: "1px solid rgba(171, 179, 183, 0.22)", padding: "8px 0" }}>
             <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-              <span style={C.pill(STRIDE_COLORS[t.stride] || "#94a3b8")}>{t.stride}</span>
-              <span style={C.pill("#475569")}>{t.defaultSeverity}</span>
+              <span style={C.pill(STRIDE_COLORS[t.stride] || "#586064")}>{t.stride}</span>
+              <span style={C.pill("#586064")}>{t.defaultSeverity}</span>
             </div>
-            <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 500 }}>{t.title}</div>
-            <div style={{ color: "#475569", fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>{t.attackVector}</div>
+            <div style={{ color: "#2b3437", fontSize: 12, fontWeight: 500 }}>{t.title}</div>
+            <div style={{ color: "#586064", fontSize: 11, marginTop: 2, lineHeight: 1.4 }}>{t.attackVector}</div>
           </div>
         ))}
       </div>
@@ -169,10 +193,10 @@ function Inspector({ node, onUpdate, onDelete }) {
         {(data.securityRequirements || []).map((r) => {
           const statusColor = r.status === "closed" ? "#30d158" : r.status === "partial" ? "#ffd60a" : "#ff9f0a";
           return (
-            <div key={r.instanceId} style={{ borderTop: "1px solid #141e30", padding: "8px 0" }}>
-              <div style={{ color: "#cbd5e1", fontSize: 12, fontWeight: 500 }}>{r.title}</div>
-              <div style={{ color: "#475569", fontSize: 11, margin: "2px 0 6px", lineHeight: 1.4 }}>{r.description}</div>
-              {r.controlFamily && <div style={{ color: "#334155", fontSize: 10, fontFamily: "monospace", marginBottom: 6 }}>{r.controlFamily}</div>}
+            <div key={r.instanceId} style={{ borderTop: "1px solid rgba(171, 179, 183, 0.22)", padding: "8px 0" }}>
+              <div style={{ color: "#2b3437", fontSize: 12, fontWeight: 500 }}>{r.title}</div>
+              <div style={{ color: "#586064", fontSize: 11, margin: "2px 0 6px", lineHeight: 1.4 }}>{r.description}</div>
+              {r.controlFamily && <div style={{ color: "#737c7f", fontSize: 10, fontFamily: "monospace", marginBottom: 6 }}>{r.controlFamily}</div>}
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <select value={r.status} onChange={(event) => updateRequirementStatus(r.instanceId, event.target.value)} style={{ ...C.inp, padding: "4px 6px", fontSize: 11, color: statusColor, borderColor: statusColor, width: 130 }}>
                   <option value="open">Open</option>
@@ -278,7 +302,7 @@ function DesignerInner({ initialModules, onCommit, onCancel }) {
 
   const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
-  const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: "#00b4d8", strokeWidth: 1.6 } }, eds)), []);
+  const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: "#436086", strokeWidth: 1.6 } }, eds)), []);
 
   const onDragOver = useCallback((event) => {
     event.preventDefault();
@@ -318,6 +342,51 @@ function DesignerInner({ initialModules, onCommit, onCancel }) {
 
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
+  const loadHrPortalDemo = useCallback(() => {
+    const idsByKey = new Map();
+    const demoNodes = [];
+    const missingComponentIds = [];
+
+    HR_PORTAL_DEMO_COMPONENTS.forEach((item) => {
+      const node = nodeFromComponent(item.componentId, item.position);
+      if (!node) {
+        missingComponentIds.push(item.componentId);
+        idsByKey.set(item.key, null);
+        return;
+      }
+      demoNodes.push(node);
+      idsByKey.set(item.key, node.id);
+    });
+
+    if (missingComponentIds.length > 0) {
+      alert(`HR demo could not load these missing stencil components: ${missingComponentIds.join(", ")}`);
+    }
+
+    const demoEdges = HR_PORTAL_DEMO_FLOWS
+      .map(([sourceKey, targetKey], index) => {
+        const source = idsByKey.get(sourceKey);
+        const target = idsByKey.get(targetKey);
+        if (!source || !target) return null;
+        return {
+          id: `demo-edge-${index}-${source}-${target}`,
+          source,
+          target,
+          animated: true,
+          style: { stroke: "#436086", strokeWidth: 1.6 }
+        };
+      })
+      .filter(Boolean);
+
+    setNodes(demoNodes);
+    setEdges(demoEdges);
+    setSelectedNodeId(demoNodes[0]?.id || null);
+
+    // Defer so React Flow has the latest graph before fitting viewport.
+    requestAnimationFrame(() => {
+      reactFlowInstance.fitView({ padding: 0.2, duration: 450 });
+    });
+  }, [reactFlowInstance]);
+
   const commit = () => {
     const modules = nodesToModules(nodes);
     const dfdEdges = edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
@@ -332,12 +401,13 @@ function DesignerInner({ initialModules, onCommit, onCancel }) {
       <PaletteSidebar />
       <div style={C.canvasWrap} ref={wrapperRef}>
         <div style={{ position: "absolute", top: 10, left: 10, right: 10, zIndex: 5, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, pointerEvents: "none" }}>
-          <div style={{ background: "#08101eee", border: "1px solid #1a2540", borderRadius: 6, padding: "6px 10px", color: "#94a3b8", fontSize: 12, fontFamily: "monospace", pointerEvents: "auto" }}>
+          <div style={{ background: "rgba(255,255,255,0.85)", backdropFilter: "blur(14px)", border: "1px solid rgba(171, 179, 183, 0.22)", borderRadius: 6, padding: "6px 10px", color: "#586064", fontSize: 12, fontFamily: "monospace", pointerEvents: "auto" }}>
             {nodes.length} components · {edges.length} flows · {totalThreats} threats · {totalReqs} requirements
           </div>
           <div style={{ display: "flex", gap: 6, pointerEvents: "auto" }}>
-            <button onClick={onCancel} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #2a3a55", background: "transparent", color: "#94a3b8", cursor: "pointer", fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}>Cancel</button>
-            <button onClick={commit} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "#00b4d8", color: "#000", fontWeight: 600, cursor: "pointer", fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}>Save & continue</button>
+            <button onClick={loadHrPortalDemo} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #436086", background: "#ffffff", color: "#436086", cursor: "pointer", fontSize: 12, fontFamily: "'Inter',sans-serif", fontWeight: 600 }}>Load HR demo</button>
+            <button onClick={onCancel} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #abb3b7", background: "transparent", color: "#586064", cursor: "pointer", fontSize: 12, fontFamily: "'Inter',sans-serif" }}>Cancel</button>
+            <button onClick={commit} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "linear-gradient(135deg, #436086 0%, #375479 100%)", color: "#f6f7ff", fontWeight: 600, cursor: "pointer", fontSize: 12, fontFamily: "'Inter',sans-serif" }}>Save & continue</button>
           </div>
         </div>
         <div style={{ width: "100%", height: "100%", minHeight: 0 }} onDrop={onDrop} onDragOver={onDragOver}>
@@ -352,7 +422,7 @@ function DesignerInner({ initialModules, onCommit, onCancel }) {
             fitView
             proOptions={{ hideAttribution: true }}
           >
-            <Background gap={20} color="#1a2540" />
+            <Background gap={20} color="rgba(171, 179, 183, 0.22)" />
             <Controls position="bottom-right" />
           </ReactFlow>
         </div>

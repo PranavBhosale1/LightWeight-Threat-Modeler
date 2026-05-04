@@ -8,11 +8,20 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-label": "^2.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@tailwindcss/vite": "^4.2.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "jsonrepair": "^3.14.0",
     "jszip": "^3.10.1",
+    "lucide-react": "^1.14.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "reactflow": "^11.11.4"
+    "react-router-dom": "^7.14.2",
+    "reactflow": "^11.11.4",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

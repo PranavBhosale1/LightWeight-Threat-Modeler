@@ -4,7 +4,7 @@ import { parseGeminiJson } from "./geminiJson.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const PALETTE = [
-  { type:"entity",   label:"External Entity", color:"#00b4d8", w:136, h:52  },
+  { type:"entity",   label:"External Entity", color:"#436086", w:136, h:52  },
   { type:"process",  label:"Process",          color:"#4ade80", w:144, h:64  },
   { type:"store",    label:"Data Store",       color:"#a78bfa", w:144, h:52  },
   { type:"boundary", label:"Trust Boundary",   color:"#ff9f0a", w:230, h:160 },
@@ -27,6 +27,13 @@ const DREAD_DIMS = [
   {id:"discoverability",label:"Discov."},
 ];
 
+const SIZE_LIMITS = {
+  entity: { minW: 90, maxW: 360, minH: 36, maxH: 180 },
+  process: { minW: 100, maxW: 380, minH: 42, maxH: 220 },
+  store: { minW: 100, maxW: 380, minH: 36, maxH: 180 },
+  boundary: { minW: 140, maxW: 700, minH: 100, maxH: 520 }
+};
+
 const DRAG_THRESHOLD = 5;
 let _id = 0;
 const uid = (p="n") => `${p}${++_id}`;
@@ -41,15 +48,48 @@ const riskOf = (s) =>
   :        {label:"Low",     color:"#30d158",bg:"rgba(48,209,88,.12)"};
 
 // ─── Gemini ───────────────────────────────────────────────────────────────────
+const GEMINI_MODEL_FALLBACKS = [
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash"
+];
+
+const isRetryableGeminiFailure = (status, message = "") =>
+  status === 429 || status === 404 || status >= 500
+  || /high demand|try again later|temporar|overload|unavailable|deadline|timeout/i.test(message);
+
 async function gemini(key, prompt) {
-  const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`,
-    { method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:.2,maxOutputTokens:8192,responseMimeType:"application/json"}}) }
+  let lastError = null;
+  for (const model of GEMINI_MODEL_FALLBACKS) {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          contents:[{parts:[{text:prompt}]}],
+          generationConfig:{temperature:.2,maxOutputTokens:8192,responseMimeType:"application/json"}
+        })
+      }
+    );
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && !d.error) {
+      const text = d?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text != null && text !== "") return text;
+      const reason = d?.promptFeedback?.blockReason || d?.candidates?.[0]?.finishReason;
+      const message = reason ? `No model text (${reason})` : "No model text in response";
+      if (!isRetryableGeminiFailure(r.status, message)) throw new Error(message);
+      lastError = new Error(`[${model}] ${message}`);
+      continue;
+    }
+    const message = d?.error?.message || `HTTP ${r.status}`;
+    if (!isRetryableGeminiFailure(r.status, message)) throw new Error(message);
+    lastError = new Error(`[${model}] ${message}`);
+  }
+  throw new Error(
+    `All Gemini model fallbacks failed (${GEMINI_MODEL_FALLBACKS.join(" -> ")}). ${lastError?.message || ""}`.trim()
   );
-  const d = await r.json();
-  if (!r.ok || d.error) throw new Error(d?.error?.message || `HTTP ${r.status}`);
-  return d.candidates[0].content.parts[0].text;
 }
 const parseJ = (t) => parseGeminiJson(t);
 
@@ -72,6 +112,8 @@ function NodeShape({ node, selected }) {
   );
   return null;
 }
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
 function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, onCanvasClick }) {
@@ -136,13 +178,13 @@ function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, o
       onMouseMove={handleMM} onMouseUp={handleMU} onClick={handleSvgClick}>
       <defs>
         <pattern id="dots" width="30" height="30" patternUnits="userSpaceOnUse">
-          <circle cx="15" cy="15" r=".9" fill="#1a2844"/>
+          <circle cx="15" cy="15" r=".9" fill="rgba(115,124,127,0.28)"/>
         </pattern>
         <marker id="ah" markerWidth={8} markerHeight={8} refX={7} refY={3} orient="auto">
-          <path d="M0,0 L0,6 L7,3 z" fill="#2a3d5a"/>
+          <path d="M0,0 L0,6 L7,3 z" fill="#737c7f"/>
         </marker>
         <marker id="ah-live" markerWidth={8} markerHeight={8} refX={7} refY={3} orient="auto">
-          <path d="M0,0 L0,6 L7,3 z" fill="#00b4d8"/>
+          <path d="M0,0 L0,6 L7,3 z" fill="#436086"/>
         </marker>
       </defs>
       <rect width="100%" height="100%" fill="url(#dots)"/>
@@ -165,10 +207,21 @@ function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, o
         if(!fn||!tn) return null;
         return (
           <g key={edge.id}>
-            <path d={edgePath(fn,tn)} fill="none" stroke="#1e3654" strokeWidth={1.5}
+            <path d={edgePath(fn,tn)} fill="none" stroke="#737c7f" strokeWidth={1.5}
               strokeDasharray="6,4" markerEnd="url(#ah)"/>
-            {edge.label && <text x={(fn.x+tn.x)/2} y={(fn.y+tn.y)/2-48}
-              textAnchor="middle" fill="#2a3d5a" fontSize={10} fontFamily="monospace">{edge.label}</text>}
+            {edge.label && (() => {
+              const label = String(edge.label).trim();
+              const display = label.length > 28 ? `${label.slice(0, 25)}...` : label;
+              const textW = Math.max(36, display.length * 6.4 + 12);
+              const lx = (fn.x + tn.x) / 2;
+              const ly = (fn.y + tn.y) / 2 - 54;
+              return (
+                <>
+                  <rect x={lx - textW / 2} y={ly - 10} width={textW} height={14} rx={3} fill="rgba(241,244,246,0.95)" stroke="rgba(88,96,100,0.35)" />
+                  <text x={lx} y={ly} textAnchor="middle" fill="#2b3437" fontSize={10.5} fontFamily="monospace">{display}</text>
+                </>
+              );
+            })()}
           </g>
         );
       })}
@@ -176,11 +229,11 @@ function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, o
       {/* Live connect line */}
       {mode==="connect" && fromNode && (
         <path d={`M${fromNode.x},${fromNode.y} L${mouse.x},${mouse.y}`}
-          fill="none" stroke="#00b4d8" strokeWidth={1.5} strokeDasharray="6,3" markerEnd="url(#ah-live)"/>
+          fill="none" stroke="#436086" strokeWidth={1.5} strokeDasharray="6,3" markerEnd="url(#ah-live)"/>
       )}
       {mode==="connect" && connectFrom && (
         <circle cx={fromNode?.x} cy={fromNode?.y} r={6}
-          fill="none" stroke="#00b4d8" strokeWidth={2} opacity={.7}/>
+          fill="none" stroke="#436086" strokeWidth={2} opacity={.7}/>
       )}
 
       {/* Main nodes */}
@@ -196,12 +249,12 @@ function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, o
             )}
             <NodeShape node={nd} selected={isSelected}/>
             <text textAnchor="middle" dominantBaseline="central" y={nd.type==="store"?1:0}
-              fill="#e2e8f0" fontSize={12} fontFamily="'DM Sans',sans-serif" style={{pointerEvents:"none"}}>
+              fill="#2b3437" fontSize={12} fontFamily="'Inter',sans-serif" style={{pointerEvents:"none"}}>
               {nd.label}
             </text>
             {/* Analyzing spinner */}
             {nd.analyzing && (
-              <text textAnchor="middle" y={nd.h/2+15} fill="#00b4d8" fontSize={9} fontFamily="monospace" style={{pointerEvents:"none"}}>
+              <text textAnchor="middle" y={nd.h/2+15} fill="#436086" fontSize={9} fontFamily="monospace" style={{pointerEvents:"none"}}>
                 analyzing...
               </text>
             )}
@@ -221,13 +274,13 @@ function Canvas({ nodes, edges, selectedId, mode, onSelect, onConnect, onMove, o
 }
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
-const BG    = "#050810";
-const PANEL = "#090f1c";
-const CARD  = "#0d1421";
-const BDR   = "#182038";
-const TXT   = "#e2e8f0";
+const BG    = "#f8f9fa";
+const PANEL = "#f1f4f6";
+const CARD  = "#ffffff";
+const BDR   = "#abb3b7";
+const TXT   = "#2b3437";
 const MUT   = "#4a5568";
-const ACT   = "#00b4d8";
+const ACT   = "#436086";
 
 const Tag = ({label,color,bg}) =>
   <span style={{background:bg||`${color}20`,color,padding:"2px 8px",borderRadius:3,fontSize:11,fontFamily:"monospace"}}>{label}</span>;
@@ -246,7 +299,9 @@ export default function ThreatModelerCanvas({
   setApiKey: setApiKeyProp,
   initialAppName,
   initialAppDesc,
-  initialAppStack
+  initialAppStack,
+  initialModel,
+  onModelChange
 }) {
   const [internalApiKey, setInternalApiKey] = useState(DEFAULT_GEMINI_API_KEY);
   const keyControlled = setApiKeyProp != null;
@@ -255,12 +310,12 @@ export default function ThreatModelerCanvas({
 
   const [view,      setView]      = useState("canvas");
   const [showKey,   setShowKey]   = useState(false);
-  const [appName,   setAppName]   = useState(() => (initialAppName?.trim() ? initialAppName.trim() : "Untitled Model"));
-  const [appDesc,   setAppDesc]   = useState(() => initialAppDesc ?? "");
-  const [appStack,  setAppStack]  = useState(() => initialAppStack ?? "");
+  const [appName,   setAppName]   = useState(() => (initialModel?.appName?.trim() || initialAppName?.trim() || "Untitled Model"));
+  const [appDesc,   setAppDesc]   = useState(() => initialModel?.appDesc ?? initialAppDesc ?? "");
+  const [appStack,  setAppStack]  = useState(() => initialModel?.appStack ?? initialAppStack ?? "");
   const [mode,      setMode]      = useState("select");
-  const [nodes,     setNodes]     = useState([]);
-  const [edges,     setEdges]     = useState([]);
+  const [nodes,     setNodes]     = useState(() => Array.isArray(initialModel?.nodes) ? initialModel.nodes.map((n) => ({ ...n })) : []);
+  const [edges,     setEdges]     = useState(() => Array.isArray(initialModel?.edges) ? initialModel.edges.map((e) => ({ ...e })) : []);
   const [selected,  setSelected]  = useState(null);
   const [error,     setError]     = useState(null);
   const [mitLoading,setMitLoading]= useState(false);
@@ -285,6 +340,17 @@ export default function ThreatModelerCanvas({
     return ()=>window.removeEventListener("keydown",h);
   }, [selected]);
 
+  useEffect(() => {
+    if (!onModelChange) return;
+    onModelChange({
+      appName,
+      appDesc,
+      appStack,
+      nodes: nodes.map((n) => ({ ...n })),
+      edges: edges.map((e) => ({ ...e }))
+    });
+  }, [appName, appDesc, appStack, nodes, edges, onModelChange]);
+
   const addNode = (type) => {
     const p = PALETTE.find(x=>x.type===type);
     const cx = 200 + Math.random()*400, cy = 100 + Math.random()*280;
@@ -300,6 +366,16 @@ export default function ThreatModelerCanvas({
   };
 
   const updateNode = (id, upd) => setNodes(ns=>ns.map(n=>n.id===id?{...n,...upd}:n));
+  const resizeNode = (id, axis, next) => {
+    setNodes((ns) => ns.map((n) => {
+      if (n.id !== id) return n;
+      const lim = SIZE_LIMITS[n.type] || SIZE_LIMITS.process;
+      if (axis === "w") {
+        return { ...n, w: clamp(Number(next) || n.w, lim.minW, lim.maxW) };
+      }
+      return { ...n, h: clamp(Number(next) || n.h, lim.minH, lim.maxH) };
+    }));
+  };
 
   const del = () => {
     if (!selected) return;
@@ -438,8 +514,8 @@ Return ONLY valid JSON — map from threat id to remediation:
     : { display: "flex", flexDirection: "column", height: "100vh" };
 
   return (
-    <div style={{...rootLayout,background:BG,fontFamily:"'DM Sans',sans-serif",color:TXT,overflow:"hidden"}}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');*{box-sizing:border-box;margin:0;padding:0}input:focus,textarea:focus{outline:none}::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#182038}::-webkit-scrollbar-track{background:transparent}input[type=range]{-webkit-appearance:none;height:3px;background:#182038;border-radius:2px;outline:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;cursor:pointer}select option{background:#0d1421}`}</style>
+    <div style={{...rootLayout,background:BG,fontFamily:"'Inter',sans-serif",color:TXT,overflow:"hidden"}}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}input:focus,textarea:focus{outline:none}::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#abb3b7}::-webkit-scrollbar-track{background:transparent}input[type=range]{-webkit-appearance:none;height:3px;background:#abb3b7;border-radius:2px;outline:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;cursor:pointer}select option{background:#ffffff}`}</style>
 
       {/* ── Top Bar ─────────────────────────────────────────────── */}
       <div style={{height:48,background:PANEL,borderBottom:`1px solid ${BDR}`,display:"flex",alignItems:"center",flexShrink:0,zIndex:10}}>
@@ -449,7 +525,7 @@ Return ONLY valid JSON — map from threat id to remediation:
         </div>
         {/* App name */}
         <input value={appName} onChange={e=>setAppName(e.target.value)}
-          style={{background:"transparent",border:"none",color:TXT,fontSize:13,padding:"0 14px",height:"100%",minWidth:180,maxWidth:240,fontFamily:"'DM Sans',sans-serif"}}/>
+          style={{background:"transparent",border:"none",color:TXT,fontSize:13,padding:"0 14px",height:"100%",minWidth:180,maxWidth:240,fontFamily:"'Inter',sans-serif"}}/>
         {/* Tabs */}
         <div style={{display:"flex",height:"100%",marginLeft:"auto"}}>
           {tabBtn("canvas","Canvas")}
@@ -466,7 +542,7 @@ Return ONLY valid JSON — map from threat id to remediation:
         )}
         {!hideApiKeyInToolbar && (
           <div style={{padding:"0 12px",height:"100%",display:"flex",alignItems:"center",position:"relative",flexShrink:0}}>
-            <button onClick={()=>setShowKey(s=>!s)} style={{background:apiKey?"rgba(48,209,88,.1)":"rgba(239,68,68,.1)",border:`1px solid ${apiKey?"#30d158":"#ef4444"}`,color:apiKey?"#30d158":"#ef4444",padding:"3px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontFamily:"monospace",whiteSpace:"nowrap"}}>
+            <button onClick={()=>setShowKey(s=>!s)} style={{background:apiKey?"rgba(58,87,100,0.08)":"rgba(239,68,68,.1)",border:`1px solid ${apiKey?"#30d158":"#ef4444"}`,color:apiKey?"#30d158":"#ef4444",padding:"3px 10px",borderRadius:4,cursor:"pointer",fontSize:11,fontFamily:"monospace",whiteSpace:"nowrap"}}>
               {apiKey?"Gemini OK":"Add key"}
             </button>
             {showKey && (
@@ -474,8 +550,8 @@ Return ONLY valid JSON — map from threat id to remediation:
                 <div style={{color:MUT,fontSize:10,fontFamily:"monospace",marginBottom:6,letterSpacing:1}}>GEMINI API KEY</div>
                 <input type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)}
                   placeholder="AIza..." style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"7px 9px",color:TXT,fontSize:12,fontFamily:"monospace"}}/>
-                <p style={{color:"#2a3d5a",fontSize:10,margin:"6px 0 8px"}}>Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color:ACT}}>aistudio.google.com</a></p>
-                <button onClick={()=>setShowKey(false)} style={{width:"100%",padding:6,background:ACT,border:"none",borderRadius:4,color:"#000",cursor:"pointer",fontSize:12,fontWeight:600}}>Done</button>
+                <p style={{color:"#586064",fontSize:10,margin:"6px 0 8px"}}>Get free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color:ACT}}>aistudio.google.com</a></p>
+                <button onClick={()=>setShowKey(false)} style={{width:"100%",padding:6,background:ACT,border:"none",borderRadius:4,color:"#f6f7ff",cursor:"pointer",fontSize:12,fontWeight:600}}>Done</button>
               </div>
             )}
           </div>
@@ -536,15 +612,15 @@ Return ONLY valid JSON — map from threat id to remediation:
 
             <div style={{padding:"10px 10px 8px",borderBottom:`1px solid ${BDR}`}}>
               <div style={{color:MUT,fontSize:9,fontFamily:"monospace",letterSpacing:1.5,marginBottom:8}}>APP CONTEXT</div>
-              <textarea value={appDesc} onChange={e=>setAppDesc(e.target.value)} placeholder="What does this app do?" style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,resize:"vertical",minHeight:52,fontFamily:"'DM Sans',sans-serif",marginBottom:6}}/>
-              <input value={appStack} onChange={e=>setAppStack(e.target.value)} placeholder="Tech stack..." style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,fontFamily:"'DM Sans',sans-serif"}}/>
+              <textarea value={appDesc} onChange={e=>setAppDesc(e.target.value)} placeholder="What does this app do?" style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,resize:"vertical",minHeight:52,fontFamily:"'Inter',sans-serif",marginBottom:6}}/>
+              <input value={appStack} onChange={e=>setAppStack(e.target.value)} placeholder="Tech stack..." style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"6px 8px",color:TXT,fontSize:11,fontFamily:"'Inter',sans-serif"}}/>
             </div>
 
             <div style={{padding:"10px"}}>
               <button onClick={analyzeAll} disabled={allLoading||!nodes.length} style={{
                 width:"100%",padding:"8px 0",background:allLoading?"transparent":ACT,
                 border:`1px solid ${ACT}`,borderRadius:5,cursor:(allLoading||!nodes.length)?"default":"pointer",
-                color:allLoading?ACT:"#000",fontSize:12,fontWeight:600,transition:"all .15s"
+                color:allLoading?ACT:"#2b3437",fontSize:12,fontWeight:600,transition:"all .15s"
               }}>
                 {allLoading?"Analyzing...":"Analyze All"}
               </button>
@@ -559,8 +635,8 @@ Return ONLY valid JSON — map from threat id to remediation:
             {nodes.length===0 && (
               <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",pointerEvents:"none",gap:8}}>
                 <div style={{fontSize:48,opacity:.06}}>+</div>
-                <div style={{color:"#141e30",fontSize:13,fontFamily:"monospace"}}>Add components from the palette</div>
-                <div style={{color:"#0e1728",fontSize:11,fontFamily:"monospace"}}>Use Connect tool to draw data flows. Click nodes to analyze threats.</div>
+                <div style={{color:"#2b3437",fontSize:13,fontFamily:"monospace"}}>Add components from the palette</div>
+                <div style={{color:"#586064",fontSize:11,fontFamily:"monospace"}}>Use Connect tool to draw data flows. Click nodes to analyze threats.</div>
               </div>
             )}
             <Canvas nodes={nodes} edges={edges} selectedId={selected} mode={mode}
@@ -580,7 +656,36 @@ Return ONLY valid JSON — map from threat id to remediation:
                     <button onClick={del} type="button" aria-label="Remove component" style={{background:"none",border:"none",color:MUT,cursor:"pointer",fontSize:16,lineHeight:1}}>x</button>
                   </div>
                   <input value={selectedNode.label} onChange={e=>updateNode(selected,{label:e.target.value})}
-                    style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"7px 9px",color:TXT,fontSize:13,fontFamily:"'DM Sans',sans-serif"}}/>
+                    style={{width:"100%",background:BG,border:`1px solid ${BDR}`,borderRadius:4,padding:"7px 9px",color:TXT,fontSize:13,fontFamily:"'Inter',sans-serif"}}/>
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ color: MUT, fontSize: 9, fontFamily: "monospace", letterSpacing: 1, marginBottom: 6 }}>SIZE (ELASTIC)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", marginBottom: 5 }}>
+                      <span style={{ color: MUT, fontSize: 10, fontFamily: "monospace" }}>Width</span>
+                      <span style={{ color: selectedNode.color, fontSize: 10, fontFamily: "monospace" }}>{Math.round(selectedNode.w)}</span>
+                      <input
+                        type="range"
+                        min={(SIZE_LIMITS[selectedNode.type] || SIZE_LIMITS.process).minW}
+                        max={(SIZE_LIMITS[selectedNode.type] || SIZE_LIMITS.process).maxW}
+                        step={2}
+                        value={selectedNode.w}
+                        onChange={(e) => resizeNode(selected, "w", e.target.value)}
+                        style={{ gridColumn: "1 / span 2", width: "100%", accentColor: selectedNode.color }}
+                      />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center" }}>
+                      <span style={{ color: MUT, fontSize: 10, fontFamily: "monospace" }}>Height</span>
+                      <span style={{ color: selectedNode.color, fontSize: 10, fontFamily: "monospace" }}>{Math.round(selectedNode.h)}</span>
+                      <input
+                        type="range"
+                        min={(SIZE_LIMITS[selectedNode.type] || SIZE_LIMITS.process).minH}
+                        max={(SIZE_LIMITS[selectedNode.type] || SIZE_LIMITS.process).maxH}
+                        step={2}
+                        value={selectedNode.h}
+                        onChange={(e) => resizeNode(selected, "h", e.target.value)}
+                        style={{ gridColumn: "1 / span 2", width: "100%", accentColor: selectedNode.color }}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Threats Panel */}
@@ -596,7 +701,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                   </div>
 
                   {(selectedNode.threats||[]).length===0 ? (
-                    <div style={{color:"#1e2d4a",fontSize:11,textAlign:"center",padding:"24px 0",fontFamily:"monospace",lineHeight:2}}>
+                    <div style={{color:"#586064",fontSize:11,textAlign:"center",padding:"24px 0",fontFamily:"monospace",lineHeight:2}}>
                       No threats yet.<br/>Click Analyze to auto-identify<br/>STRIDE threats for this component.
                     </div>
                   ) : (
@@ -624,7 +729,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                                 const v=t.dread?.[d.id]||5;
                                 return (
                                   <div key={d.id} style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
-                                    <span style={{color:"#2a3d5a",fontSize:9,fontFamily:"monospace",width:46,flexShrink:0}}>{d.label}</span>
+                                    <span style={{color:"#586064",fontSize:9,fontFamily:"monospace",width:46,flexShrink:0}}>{d.label}</span>
                                     <input type="range" min={1} max={10} step={1} value={v}
                                       onChange={e=>setThreatDread(selected,t.id,d.id,+e.target.value)}
                                       style={{flex:1,accentColor:sc?.color}}/>
@@ -647,7 +752,7 @@ Return ONLY valid JSON — map from threat id to remediation:
               </>
             ) : (
               <div style={{padding:16,flex:1}}>
-                <div style={{color:"#1e2d4a",fontSize:11,textAlign:"center",fontFamily:"monospace",lineHeight:2,marginTop:32}}>
+                <div style={{color:"#586064",fontSize:11,textAlign:"center",fontFamily:"monospace",lineHeight:2,marginTop:32}}>
                   Select a component<br/>to view and analyze threats
                 </div>
                 {allApplicable.length>0 && (
@@ -683,7 +788,7 @@ Return ONLY valid JSON — map from threat id to remediation:
             </div>
 
             {allApplicable.length===0 ? (
-              <div style={{textAlign:"center",color:"#1e2d4a",padding:60,fontFamily:"monospace"}}>
+              <div style={{textAlign:"center",color:"#586064",padding:60,fontFamily:"monospace"}}>
                 No applicable threats - analyze your components on the canvas first.
               </div>
             ) : (<>
@@ -703,7 +808,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                     <button key={f} onClick={()=>setActiveFilter(f)} style={{
                       padding:"4px 10px",borderRadius:4,fontSize:10,fontFamily:"monospace",cursor:"pointer",
                       background:activeFilter===f?col:"transparent",border:`1px solid ${col}`,
-                      color:activeFilter===f?"#000":"#4a5568",transition:"all .12s"
+                      color:activeFilter===f?"#2b3437":"#586064",transition:"all .12s"
                     }}>
                       {f==="all"?"All":f} ({cnt})
                     </button>
@@ -740,7 +845,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                         const v=t.dread?.[d.id]||5;
                         return (
                           <div key={d.id}>
-                            <div style={{color:"#2a3d5a",fontSize:9,fontFamily:"monospace",marginBottom:3}}>{d.label}</div>
+                            <div style={{color:"#586064",fontSize:9,fontFamily:"monospace",marginBottom:3}}>{d.label}</div>
                             <input type="range" min={1} max={10} step={1} value={v}
                               onChange={e=>setThreatDread(t.nodeId,t.id,d.id,+e.target.value)}
                               style={{width:"100%",accentColor:sc?.color}}/>
@@ -767,7 +872,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                 <button onClick={generateMit} disabled={mitLoading||!allApplicable.length} style={{
                   padding:"7px 14px",background:mitLoading?"transparent":ACT,
                   border:`1px solid ${ACT}`,borderRadius:5,cursor:(mitLoading||!allApplicable.length)?"default":"pointer",
-                  color:mitLoading?ACT:"#000",fontSize:12,fontWeight:600
+                  color:mitLoading?ACT:"#2b3437",fontSize:12,fontWeight:600
                 }}>
                   {mitLoading?"Generating...":"Generate Remediation"}
                 </button>
@@ -781,7 +886,7 @@ Return ONLY valid JSON — map from threat id to remediation:
               <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
                 {[{l:"Components",v:nodes.filter(n=>n.type!=="boundary").length,c:ACT},{l:"Data Flows",v:edges.length,c:"#a78bfa"},{l:"Threats",v:allApplicable.length,c:"#ff9f0a"},{l:"Critical",v:critN,c:"#ff2d55"}].map(x=><Pill key={x.l} label={x.l} value={x.v} color={x.c}/>)}
               </div>
-              <p style={{color:"#94a3b8",fontSize:13,lineHeight:1.8}}>
+              <p style={{color:"#586064",fontSize:13,lineHeight:1.8}}>
                 Threat modeling was performed on <strong style={{color:TXT}}>{appName}</strong>
                 {appStack && <> using <strong style={{color:TXT}}>{appStack}</strong></>}.
                 The STRIDE methodology identified <strong style={{color:TXT}}>{allApplicable.length} applicable threats</strong> across {nodes.filter(n=>n.type!=="boundary").length} components and {edges.length} data flows.
@@ -826,7 +931,7 @@ Return ONLY valid JSON — map from threat id to remediation:
                   {allApplicable.map((t,i)=>{
                     const sc=STRIDE_CATS.find(s=>s.id===t.strideCategory);
                     const s=+(t.score.toFixed(1)),rv=riskOf(s);
-                    return <tr key={i} style={{borderBottom:`1px solid #0a1020`,background:i%2?"rgba(255,255,255,.008)":"transparent"}}>
+                    return <tr key={i} style={{borderBottom:`1px solid rgba(171, 179, 183, 0.22)`,background:i%2?"rgba(67,96,134,.03)":"transparent"}}>
                       <td style={{padding:"7px 8px",color:t.nodeColor}}>{t.nodeLabel}</td>
                       <td style={{padding:"7px 8px"}}><Tag label={sc?.id||"?"} color={sc?.color||"#fff"}/></td>
                       <td style={{padding:"7px 8px",color:"#cbd5e1"}}>{t.title}</td>
@@ -861,12 +966,12 @@ Return ONLY valid JSON — map from threat id to remediation:
                   </div>
                   <div style={{color:"#30d158",fontSize:13,marginBottom:6}}>- {mit.shortFix}</div>
                   {mit.steps?.map((s,i)=><div key={i} style={{color:MUT,fontSize:12,paddingLeft:14,marginBottom:2}}>{i+1}. {s}</div>)}
-                  {mit.control&&<div style={{color:"#2a3d5a",fontSize:11,marginTop:6}}>Control: <span style={{color:"#334155"}}>{mit.control}</span></div>}
+                  {mit.control&&<div style={{color:"#586064",fontSize:11,marginTop:6}}>Control: <span style={{color:"#737c7f"}}>{mit.control}</span></div>}
                 </div>;
               })}
             </div>}
 
-            <div style={{textAlign:"center",color:"#182038",fontSize:10,fontFamily:"monospace",marginTop:16,paddingBottom:8}}>
+            <div style={{textAlign:"center",color:"#abb3b7",fontSize:10,fontFamily:"monospace",marginTop:16,paddingBottom:8}}>
               ThreatModeler · {appName} · {new Date().toLocaleDateString()}
             </div>
           </div>

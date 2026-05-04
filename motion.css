@@ -1,0 +1,203 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --tm-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+* {
+  scroll-behavior: smooth;
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground;
+}
+
+button,
+a,
+[role="button"] {
+  transition: transform 220ms var(--tm-ease), opacity 220ms var(--tm-ease), box-shadow 240ms var(--tm-ease), background-color 220ms var(--tm-ease), color 220ms var(--tm-ease);
+}
+
+button:hover,
+a:hover,
+[role="button"]:hover {
+  transform: translateY(-1px);
+}
+
+button:active,
+[role="button"]:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.tm-page-enter {
+  animation: tmFadeIn 520ms var(--tm-ease);
+}
+
+.tm-hero {
+  position: relative;
+  overflow: hidden;
+}
+
+.tm-hero::after {
+  content: "";
+  position: absolute;
+  inset: -45% -25% auto auto;
+  width: 320px;
+  height: 320px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(211, 227, 255, 0.75) 0%, rgba(211, 227, 255, 0) 70%);
+  animation: tmFloatGlow 6.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.tm-stagger > * {
+  opacity: 0;
+  animation: tmRise 640ms var(--tm-ease) forwards;
+}
+
+.tm-stagger > *:nth-child(1) { animation-delay: 60ms; }
+.tm-stagger > *:nth-child(2) { animation-delay: 120ms; }
+.tm-stagger > *:nth-child(3) { animation-delay: 180ms; }
+.tm-stagger > *:nth-child(4) { animation-delay: 240ms; }
+.tm-stagger > *:nth-child(5) { animation-delay: 300ms; }
+.tm-stagger > *:nth-child(6) { animation-delay: 360ms; }
+.tm-stagger > *:nth-child(7) { animation-delay: 420ms; }
+.tm-stagger > *:nth-child(8) { animation-delay: 480ms; }
+.tm-stagger > *:nth-child(9) { animation-delay: 540ms; }
+
+.tm-card-hover {
+  transition: transform 260ms var(--tm-ease), box-shadow 260ms var(--tm-ease), background-color 260ms var(--tm-ease);
+}
+
+.tm-card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 42px rgba(43, 52, 55, 0.1);
+}
+
+.tm-pulse-dot {
+  animation: tmPulse 2.6s ease-in-out infinite;
+}
+
+@keyframes tmFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tmRise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.99);
+    filter: blur(1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes tmPulse {
+  0%, 100% {
+    opacity: 0.42;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes tmFloatGlow {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translate(-12px, 12px) scale(1.08);
+    opacity: 0.65;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
